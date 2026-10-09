@@ -57,9 +57,9 @@ const ACT = TOUCH ? 'TAP' : 'SLAP';
 // ============================================================ persistence
 const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, window.SAVED || {});
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
-let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted;
+let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
 function save() {
-  const d = { best, sens: sensLevel, crt: crtOn, muted };
+  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen };
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -443,6 +443,36 @@ function pcircle(cx, cy, r, col) {
   for (let y = -r; y < r; y += 2) for (let x = -r; x < r; x += 2) if ((x + 1) ** 2 + (y + 1) ** 2 <= r * r) g.fillRect(cx + x, cy + y, 2, 2);
 }
 
+// ============================================================ patch notes
+// Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
+// Font has A-Z 0-9 and ! < > - . : ? / only. Each page: title + items of { h: heading, t: text, col }.
+const NOTES_VERSION = 1;
+const PATCH_NOTES = [
+  { title: 'BOSS UPDATE', items: [
+    { h: 'PINK MEANS PARRY', col: '#e0309a', t: 'ONLY PINK SHOTS CAN BE HIT BACK. EVERYTHING ELSE HURTS - DODGE IT!' },
+    { h: 'KING CROW', t: 'THE FIRST BOSS IS NOW A TUTORIAL. ALL ITS SHOTS ARE PINK.' },
+  ] },
+  { title: 'NEW BOSSES', items: [
+    { h: 'MECHA CROW', col: '#2a8ab8', t: 'GATLING STREAMS AND SHORT BURSTS BETWEEN SHOTS.' },
+    { h: 'THUNDER HAWK', col: '#b08010', t: 'WALLS WITH ONE GAP AND SHOTS THAT RAIN DOWN.' },
+    { h: 'CROW OMEGA', col: '#a02c40', t: 'BIG. FANS AND RINGS OF FIRE.' },
+  ] },
+  { title: 'ALSO NEW', items: [
+    { h: 'TOUGHER EACH LAP', t: 'BOSSES RETURN WITH MORE HP AND FASTER ATTACKS.' },
+    { h: 'MIND THE SKY', t: 'FLY OFF THE TOP OF THE SCREEN AND YOU CRASH. NO MORE SPAM PARRYING!' },
+  ] },
+];
+let notesPage = notesSeen < NOTES_VERSION ? 0 : -1;   // -1 = closed
+function nextNotesPage() {
+  if (++notesPage >= PATCH_NOTES.length) { notesPage = -1; notesSeen = NOTES_VERSION; save(); sfx('swoosh'); }
+  else sfx('blip', true);
+}
+function wrapText(str, max) {
+  const out = []; let line = '';
+  for (const w of str.split(' ')) { if (line && (line + ' ' + w).length > max) { out.push(line); line = w; } else line = line ? line + ' ' + w : w; }
+  if (line) out.push(line); return out;
+}
+
 // ============================================================ game state
 const GRAV = 0.25, FLAP = -5.2, MAXV = 8, BIRD_R = 10, INTRO = 24;
 const FIRST_BOSS = 15, BOSS_EVERY = 20, PARRY_R = 74;
@@ -480,6 +510,7 @@ function setBanner(text, sub, kind = 'info', life = 110) { banner = { text, sub,
 function flap(src) {
   audioInit();
   if (paused) paused = false;
+  if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
   if (state === 'dying') return;
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
   if (state === 'ready') state = 'play';
@@ -940,6 +971,32 @@ function pauseButton(x, y) {
 function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.8; save(); if (!muted) sfx('blip', true); }
 function toggleCrt() { crtOn = !crtOn; save(); sfx('blip', crtOn); }
 
+function notesButton(y) {
+  const label = 'PATCH NOTES', w = tw(label) + 28;
+  button(Math.round((LW - w) / 2), y, w, 30, label, () => { notesPage = 0; sfx('blip', true); });
+}
+function drawNotes() {
+  const pg = PATCH_NOTES[notesPage], w = wide ? 460 : LW - 28, x = Math.round((LW - w) / 2), max = Math.floor((w - 28) / 12);
+  // every page gets the height of the tallest one, so the panel doesn't jump around
+  const h = Math.max(...PATCH_NOTES.map(q => q.items.reduce((a, it) => a + 32 + 18 * wrapText(it.t, max).length, 104)));
+  const y = Math.max(16, Math.round(214 - h / 2));
+  buttons = [];                                         // the whole screen turns the page
+  g.fillStyle = 'rgba(20,12,24,0.5)'; g.fillRect(0, 0, LW, LH);
+  drawPanel(x, y, w, h);
+  text('WHAT IS NEW', LW / 2, y + 12, 2, '#e86a17', '#ded895', 0);
+  text(pg.title, LW / 2, y + 34, 3, '#fff', '#543847', 2);
+  let ly = y + 74;
+  for (const it of pg.items) {
+    if (it.col === '#e0309a') { pcircle(x + 24, ly + 6, 8, '#4a1038'); pcircle(x + 24, ly + 6, 6, '#ff5cc8'); pcircle(x + 22, ly + 4, 2, '#fff'); }
+    text(it.h, it.col === '#e0309a' ? x + 40 : x + 14, ly, 2, it.col || '#e86a17', '#ded895', 0, 'l'); ly += 20;
+    for (const l of wrapText(it.t, max)) { text(l, x + 14, ly, 2, '#543847', '#ded895', 0, 'l'); ly += 18; }
+    ly += 12;
+  }
+  text((notesPage + 1) + '/' + PATCH_NOTES.length, x + w - 14, y + h - 24, 2, '#8a7438', '#ded895', 0, 'r');
+  if ((tick / 24 | 0) % 2 === 0)
+    text(ACT + (notesPage < PATCH_NOTES.length - 1 ? ' FOR MORE' : ' TO CLOSE'), x + 14, y + h - 24, 2, '#c2310c', '#ded895', 0, 'l');
+}
+
 function drawScoreboard(cx, py, w) {
   const x0 = cx - w / 2;
   drawPanel(x0, py, w, 114);
@@ -960,6 +1017,7 @@ function drawCompactHUD() {
     text('BIRD', LW / 2, 118, 6, '#ffd23f', '#543847', 4);
     text('GET READY!', LW / 2, 178, 4, '#7fe05a', '#1f5410', 2);
     if ((tick / 24 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLAP' : 'SLAP YOUR MAC TO FLAP', LW / 2, 300, TOUCH ? 3 : 2, '#fff', '#543847');
+    notesButton(340);
     if (TOUCH) { touchButtons(420); text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0); }
     else {
       drawMeter(414);
@@ -984,6 +1042,7 @@ function drawWideHUD() {
     text('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#543847', 4);
     text('GET READY!', LW / 2, 150, 4, '#7fe05a', '#1f5410', 2);
     if ((tick / 24 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLAP' : 'SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
+    notesButton(344);
     wideControls();
   }
   if (state === 'over') {
@@ -1130,6 +1189,7 @@ function draw() {
   if (wide) drawWideHUD(); else drawCompactHUD();
   if (state === 'play' || state === 'dying') drawBossHUD();
   drawBanner();
+  if (notesPage >= 0 && state === 'ready') drawNotes();
   if (paused) {
     g.fillStyle = 'rgba(20,12,24,0.45)'; g.fillRect(0, 0, LW, LH);
     text('PAUSED', LW / 2, 190, wide ? 6 : 5, '#fff', '#543847', 4);
@@ -1243,15 +1303,14 @@ addEventListener('keydown', e => {
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
   else if (k === 'Escape') { if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused); }
+  else if (k === 'KeyN' && state === 'ready') { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
 screen.addEventListener('pointerdown', e => {
-  if (TOUCH) {
-    audioInit();
-    const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * LH;
-    if (paused) return setPaused(false);
-    const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
-    if (b) return b.act();
-  }
+  audioInit();
+  const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * LH;
+  if (TOUCH && paused) return setPaused(false);
+  const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
+  if (b) return b.act();
   flap('click');
 });
 if (TOUCH) {
