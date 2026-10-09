@@ -58,9 +58,9 @@ const ACT = TOUCH ? 'TAP' : 'SLAP';
 const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, window.SAVED || {});
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
-let bank = SAVED.coins | 0;   // coins carry over between runs
+let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot tokens carry over between runs
 function save() {
-  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank };
+  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens };
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -224,6 +224,14 @@ const SFX = {
       const gn = ac.createGain(), d = i === seq.length - 1 ? 0.3 : 0.06; env(gn.gain, t + i * 0.05, 0.002, big ? 0.2 : 0.16, d);
       const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000;
       osc('square', t + i * 0.05, d, f).connect(lp); lp.connect(gn); route(gn, 0.3);
+    });
+  },
+  token() { // magical rising sparkle
+    const t = ac.currentTime;
+    [784, 1046.5, 1318.5, 1568, 2093, 2637].forEach((f, i) => {
+      const gn = ac.createGain(), ts = t + i * 0.045, d = i === 5 ? 0.6 : 0.12; env(gn.gain, ts, 0.003, 0.18, d);
+      osc('triangle', ts, d, f).connect(gn); route(gn, 0.5);
+      const g2 = ac.createGain(); env(g2.gain, ts, 0.002, 0.06, d); osc('square', ts, d, f * 2).connect(g2); route(g2, 0.4);
     });
   },
   lever() { // ratchet clicks + clunk
@@ -461,6 +469,12 @@ const heartEmpty = sprite(HEART, { k:'#543847', r:'#6a4a58', w:'#6a4a58' });
 // coins: small ones are worth 1, big ones (risky spots) are worth 3
 const GOLD = { k:'#5a3a10', y:'#f8c81c', Y:'#fff4a0', o:'#c8860c' };
 const coinSmall = sprite(['..kkk..', '.kYyyk.', 'kYyYyok', 'kYyYyok', 'kYyYyok', '.kyyok.', '..kkk..'], GOLD);
+// slot tokens: rare, worth one spin
+const TOKEN_PAL = { k:'#2a0838', p:'#c040e0', P:'#f0a0ff', d:'#7a1898', w:'#ffffff', r:'#ff4870' };
+const tokenSmall = sprite(['..kkk..', '.kPppk.', 'kPpwpdk', 'kpwwwdk', 'kPpwpdk', '.kppdk.', '..kkk..'], TOKEN_PAL);
+const tokenBig = sprite([
+  '...kkkkkk...', '.kkPPPPppkk.', '.kPPpppppdk.', 'kPPpkkkkppdk', 'kPpkrrkrrkdk', 'kPpkrrrrrkdk',
+  'kPpkkrrrkkdk', 'kPppkkrkkpdk', 'kPpppkkkppdk', '.kpppppppdk.', '.kkddddddkk.', '...kkkkkk...'], TOKEN_PAL);
 // slot machine reel symbols (12x12)
 const SYM = {
   heart: sprite([
@@ -556,19 +570,19 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 2;
+const NOTES_VERSION = 3;
 const PATCH_NOTES = [
-  { title: 'COINS', items: [
-    { h: 'GRAB THEM', col: '#c8860c', t: 'COINS SIT IN THE GAPS. YOU KEEP THEM BETWEEN RUNS.' },
-    { h: 'BIG COINS ARE WORTH 3', col: '#c2310c', t: 'THEY HIDE IN RISKY SPOTS. GO FOR IT OR PLAY IT SAFE?' },
+  { title: 'TOKENS', items: [
+    { h: 'SLOTS NOW TAKE TOKENS', col: '#c040e0', t: 'ONE TOKEN BUYS ONE SPIN. NO TOKEN? 50 COINS WORK TOO.' },
+    { h: 'CATCH THEM IF YOU CAN', col: '#7a1898', t: 'RARE TOKENS FLY AT YOU BOBBING UP AND DOWN. LOOK FOR THE SPARKLY TRAIL!' },
+  ] },
+  { title: 'MORE COINS', items: [
+    { h: 'ROWS AND ARCS', col: '#c8860c', t: 'COINS NOW COME IN ROWS AND ARCS THROUGH THE GAPS.' },
+    { h: 'BIG COINS ARE WORTH 5', col: '#c2310c', t: 'THEY STILL HIDE IN RISKY SPOTS. GO FOR IT OR PLAY IT SAFE?' },
   ] },
   { title: 'LUCKY SLOTS', items: [
-    { h: 'CRASHED? SPIN!', col: '#c01838', t: 'A SLOT MACHINE SHOWS UP WHEN YOU DIE. ONE SPIN COSTS 3 COINS.' },
-    { h: '3 HEARTS REVIVE YOU', col: '#f83850', t: 'SEVENS - BELLS AND COINS PAY OUT MORE COINS.' },
-  ] },
-  { title: 'REVIVE', items: [
-    { h: 'BACK FROM HEAVEN', col: '#c8860c', t: 'THE PIPES IN FRONT OF YOU BLOW UP AND YOU FLY ON.' },
-    { h: 'KEEPS YOUR SCORE', t: 'AND IN A BOSS FIGHT YOU GET ALL 3 HEARTS BACK.' },
+    { h: '3 HEARTS REVIVE YOU', col: '#f83850', t: 'THE PIPES IN FRONT OF YOU BLOW UP AND YOU FLY ON.' },
+    { h: 'OTHER PRIZES', col: '#2050b0', t: '777 PAYS 3 TOKENS. BELLS PAY 100 COINS AND COINS PAY 50.' },
   ] },
 ];
 let notesPage = notesSeen < NOTES_VERSION ? 0 : -1;   // -1 = closed
@@ -591,8 +605,9 @@ let overT = 0, flash = 0, hurtFlash = 0, fade = 0, shake = 0, newBest = false, d
 let popups = [], feathers = [], sparks = [], rings = [], booms = [], shots = [], paused = false;
 let spawned = 0, passedPipes = 0, nextBossAt = FIRST_BOSS, bossPending = false, boss = null, bossesBeaten = 0;
 let hearts = 3, combo = 0, parries = 0, hitstop = 0, slowmo = 0, banner = null, shownMove = false, shownChomp = false;
-const SPIN_COST = 3;
-let coins = [], coinBump = 0, slot = null, rev = null, halo = 0;   // world coins, slot machine, revive sequence
+const COINS_PER_SPIN = 50;   // a spin takes a token, or 50 coins if you have none
+const canSpin = () => tokens > 0 || bank >= COINS_PER_SPIN;
+let coins = [], coinBump = 0, tokenBump = 0, slot = null, rev = null, halo = 0;   // world coins, slot machine, revive sequence
 const speed = () => 1.5 + Math.min(passedPipes * 0.02, 0.6) + bossesBeaten * 0.1;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -705,10 +720,16 @@ const circRect = (cx, cy, r, x, y, w, h) => {
 function addCoins(p, prev, d) {
   if (spawned < 2) return;
   const add = o => coins.push(Object.assign({ pipe: p, dx: 24, dy: 0, mode: 'mid', big: false, ph: rand(0, 6), x: p.x + 24, y: 0 }, o));
+  // rare token: drifts toward the bird between pipes, bobbing up and down
+  if (prev && spawned >= 6 && Math.random() < 0.045 && !coins.some(c => c.token)) {
+    const mid = clamp(((prev.y0 + prev.y1) / 2 + (p.y0 + p.y1) / 2) / 2, 120, GY - 120);
+    coins.push({ token: true, pipe: null, x: (prev.x + 50 + p.x) / 2, y: mid, base: mid, amp: rand(55, 80), t: rand(0, 6) / 0.045, trail: [], ph: 0 });
+    return;
+  }
   const r = Math.random();
-  if (r < 0.38) add({});
-  else if (r < 0.52) for (let i = 0; i < 3; i++) add({ dx: 4 + i * 20, dy: i === 1 ? -10 : 0 });
-  else if (r < 0.72 && d.e >= 3 && p.kind !== 'chomp') add({ mode: Math.random() < 0.5 ? 'top' : 'bot', big: true });
+  if (r < 0.3) for (let i = 0; i < 3; i++) add({ dx: 4 + i * 20 });
+  else if (r < 0.5) for (let i = 0; i < 5; i++) add({ dx: -6 + i * 15, dy: ((i - 2) ** 2 - 4) * 4 });
+  else if (r < 0.7 && d.e >= 3 && p.kind !== 'chomp') add({ mode: Math.random() < 0.5 ? 'top' : 'bot', big: true });
   else if (r < 0.92 && d.e >= 3 && prev) {
     const mid = ((prev.y0 + prev.y1) / 2 + (p.y0 + p.y1) / 2) / 2, side = mid > GY / 2 + 10 ? -1 : 1;
     add({ mode: 'free', big: true, dx: (prev.x + 50 - p.x) / 2, y: clamp(mid + side * rand(100, 130), 34, GY - 28) });
@@ -717,7 +738,11 @@ function addCoins(p, prev, d) {
 function updateCoins(sp) {
   for (const c of coins) {
     const p = c.pipe;
-    if (!p) { if (state === 'play') c.x -= sp; }
+    if (c.token) {
+      if (state === 'play') { c.x -= sp + 0.6; c.t++; }
+      c.y = c.base + Math.sin(c.t * 0.045) * c.amp;
+      c.trail.push({ x: c.x, y: c.y }); if (c.trail.length > 28) c.trail.shift();
+    } else if (!p) { if (state === 'play') c.x -= sp; }
     else {
       c.x = p.x + c.dx;
       if (c.mode === 'mid') c.y = (p.y0 + p.y1) / 2 + c.dy;
@@ -725,8 +750,15 @@ function updateCoins(sp) {
       else if (c.mode === 'bot') c.y = p.y1 - 12;
     }
     if (state !== 'play' || (p && p.intro < INTRO)) continue;
-    if (Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + (c.big ? 10 : 7)) {
-      const v = c.big ? 3 : 1; c.dead = true; bank += v; coinBump = 8;
+    if (c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + 12) {
+      c.dead = true; tokens++; tokenBump = 8; save();
+      popup('+1 TOKEN', c.x, c.y - 20, { sc: 3, fill: '#f0a0ff', ol: '#2a0838', life: 50, vy: -0.6 });
+      burst(c.x, c.y, 24, ['#f0a0ff', '#c040e0', '#fff'], 4.5, 24, 4);
+      rings.push({ x: c.x, y: c.y, r: 8, dr: 4, life: 16, col: '#f0a0ff' });
+      sfx('token'); continue;
+    }
+    if (!c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + (c.big ? 10 : 7)) {
+      const v = c.big ? 5 : 1; c.dead = true; bank += v; coinBump = 8;
       popup('+' + v, c.x, c.y - 16, { sc: c.big ? 3 : 2, fill: '#ffe14d', ol: '#7a4a08', life: 30 });
       burst(c.x, c.y, c.big ? 16 : 7, ['#fff4a0', '#f8c81c', '#fff'], c.big ? 3.5 : 2.2, 16);
       if (c.big) rings.push({ x: c.x, y: c.y, r: 6, dr: 3, life: 12, col: '#fff4a0' });
@@ -735,6 +767,7 @@ function updateCoins(sp) {
   }
   coins = coins.filter(c => !c.dead && c.x > -30 && (!c.pipe || c.pipe.x > -60));
   if (coinBump > 0) coinBump--;
+  if (tokenBump > 0) tokenBump--;
 }
 
 // ------------------------------------------------------------ death slot machine
@@ -743,7 +776,7 @@ function updateCoins(sp) {
 const SYMS = ['heart', 'seven', 'bell', 'coin', 'skull'];
 const STRIP = ['heart', 'skull', 'coin', 'bell', 'heart', 'coin', 'seven', 'skull', 'bell', 'heart', 'coin', 'skull', 'bell', 'coin', 'heart', 'skull'];
 const REEL_OFF = [0, 5, 11];
-const PAY = { seven: 30, bell: 10, coin: 5 };
+const PAY = { seven: [3, 'TOKENS'], bell: [100, 'COINS'], coin: [50, 'COINS'] };
 const symAt = (i, n) => STRIP[(((n + REEL_OFF[i]) % STRIP.length) + STRIP.length) % STRIP.length];
 const pick = a => a[Math.random() * a.length | 0];
 function rollOutcome() {
@@ -758,7 +791,7 @@ function rollOutcome() {
 }
 function downed() {
   save();
-  if (bank >= SPIN_COST) {
+  if (canSpin()) {
     state = 'slot';
     slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0,
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
@@ -766,8 +799,9 @@ function downed() {
 }
 function spin() {
   const s = slot;
-  if (s.phase === 'spin' || s.phase === 'jackpot' || bank < SPIN_COST) return;
-  bank -= SPIN_COST; save(); s.spins++;
+  if (s.phase === 'spin' || s.phase === 'jackpot' || !canSpin()) return;
+  if (tokens > 0) tokens--; else bank -= COINS_PER_SPIN;
+  save(); s.spins++;
   s.out = rollOutcome(); s.phase = 'spin'; s.msg = ''; s.res = ''; s.pull = 0;
   s.suspense = s.out[0] === 'heart' && s.out[1] === 'heart';
   s.reels.forEach((r, i) => {
@@ -808,14 +842,15 @@ function resolveSpin() {
   }
   s.phase = 'result'; s.count = 540;
   if (three && PAY[o[0]]) {
-    const n = PAY[o[0]]; bank += n; save(); coinBump = 8;
-    s.res = 'win'; s.msg = '+' + n + ' COINS'; sfx('payout', n);
-    burst(LW / 2, 200, 12 + n, ['#fff4a0', '#f8c81c', '#fff'], 4, 30, 4);
+    const [n, what] = PAY[o[0]], tok = what === 'TOKENS';
+    if (tok) { tokens += n; tokenBump = 8; } else { bank += n; coinBump = 8; }
+    save(); s.res = 'win'; s.msg = '+' + n + ' ' + what; sfx('payout', tok ? 12 : n / 10);
+    burst(LW / 2, 200, 30, tok ? ['#f0a0ff', '#c040e0', '#fff'] : ['#fff4a0', '#f8c81c', '#fff'], 4, 30, 4);
   } else {
     s.res = 'lose'; s.msg = three ? 'CURSED!' : o[0] === 'heart' && o[1] === 'heart' ? 'SO CLOSE!' : 'NO LUCK';
     sfx('lose');
   }
-  if (bank < SPIN_COST) s.count = 150;      // out of coins: game over after a moment
+  if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
 function giveUp() { state = 'over'; overT = 0; slot = null; }
 
@@ -1295,7 +1330,7 @@ function drawScoreboard(cx, py, w) {
 
 function drawCompactHUD() {
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
-  if (state !== 'slot') coinCounter(LW - 12, 16, 'r');
+  if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
   if (state === 'ready') {
     text('SLAPPY', LW / 2, 64, 6, '#ffd23f', '#543847', 4);
@@ -1315,7 +1350,7 @@ function drawCompactHUD() {
     if (overT > 18) drawScoreboard(LW / 2, Math.max(176, 520 - (overT - 18) * 24), 226);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
-      if (bank < SPIN_COST) text('3 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
+      if (!canSpin()) text('50 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
       if (TOUCH) touchButtons(420); else drawMeter(414);
     }
   }
@@ -1324,7 +1359,10 @@ function drawCompactHUD() {
 function drawWideHUD() {
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 26, 6, '#fff', '#000', 3);
   wideTopBar();
-  if (state !== 'slot') { const cw = tw(String(bank)) + 46; chip(28, 60, cw, 30); coinCounter(40, 68, 'l', true); }
+  if (state !== 'slot') {
+    chip(28, 60, tw(String(bank)) + 46, 30); counter(coinSmall, bank, coinBump, 40, 68, 'l', true);
+    chip(28, 96, tw(String(tokens)) + 46, 30); counter(tokenSmall, tokens, tokenBump, 40, 104, 'l', true);
+  }
   if (state === 'ready') {
     text('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#543847', 4);
     text('GET READY!', LW / 2, 150, 4, '#7fe05a', '#1f5410', 2);
@@ -1337,7 +1375,7 @@ function drawWideHUD() {
     if (overT > 18) drawScoreboard(LW / 2, Math.max(150, 520 - (overT - 18) * 24), 300);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 296, 3, '#fff', '#543847', 2);
-      if (bank < SPIN_COST) text('COLLECT 3 COINS TO SPIN FOR A REVIVE', LW / 2, 336, 2, '#ffe14d', '#543847');
+      if (!canSpin()) text('A TOKEN OR 50 COINS BUYS A REVIVE SPIN', LW / 2, 336, 2, '#ffe14d', '#543847');
       wideControls();
     }
   }
@@ -1378,10 +1416,21 @@ function drawCoin(c) {
     if (sp < 10) { const s = sp < 5 ? 2 : 4; g.fillStyle = '#fff'; g.fillRect(x + 8 - s, y - 10, s * 2 + 2, 2); g.fillRect(x + 8, y - 10 - s, 2, s * 2 + 2); }
   } else { const w = [14, 10, 4, 10][f]; g.drawImage(coinSmall, x - w / 2, y - 7, w, 14); }
 }
-function coinCounter(x, y, align, bare) {
-  const s = String(bank), w = 20 + tw(s), x0 = align === 'r' ? x - w : x, dy = coinBump > 4 ? -2 : 0;
-  g.drawImage(coinSmall, x0, y + dy, 14, 14);
-  text(s, x0 + 20, y + dy, 2, coinBump ? '#fff' : '#ffe14d', bare ? '#000' : '#543847', bare ? 0 : 2, 'l');
+function counter(icon, n, bump, x, y, align, bare) {
+  const s = String(n), w = 20 + tw(s), x0 = align === 'r' ? x - w : x, dy = bump > 4 ? -2 : 0;
+  g.drawImage(icon, x0, y + dy, 14, 14);
+  text(s, x0 + 20, y + dy, 2, bump ? '#fff' : icon === tokenSmall ? '#f0a0ff' : '#ffe14d', bare ? '#000' : '#543847', bare ? 0 : 2, 'l');
+}
+function drawToken(c) {
+  c.trail.forEach((q, i) => {                      // sparkly comet trail
+    const k = i / c.trail.length, z = k > 0.5 ? 4 : 2;
+    if (k < 0.5 && (i + (tick >> 1)) % 3 === 0) return;
+    g.fillStyle = k > 0.7 ? '#fff' : k > 0.35 ? '#f0a0ff' : '#c040e0';
+    g.fillRect(Math.round((q.x + 8 + rand(-2, 2)) / 2) * 2, Math.round((q.y + rand(-3, 3)) / 2) * 2, z, z);
+  });
+  const x = Math.round(c.x / 2) * 2, y = Math.round(c.y / 2) * 2, w = [24, 18, 8, 18][(tick / 6 | 0) % 4];
+  pring(x, y, 17 + ((tick >> 2) & 1) * 2, (tick >> 3) & 1 ? '#f0a0ff' : '#fff');
+  g.drawImage(tokenBig, x - w / 2, y - 12, w, 24);
 }
 function drawHalo(cx, cy) {
   for (let i = 0; i < 20; i++) {
@@ -1474,26 +1523,27 @@ function drawSlot() {
 
   // pay table (cycles)
   rr(12, 168, MW - 24, 22, '#3a0c18');
-  const rows = [['heart', 'REVIVE'], ['seven', '+30'], ['bell', '+10'], ['coin', '+5']], row = rows[(tick / 90 | 0) % rows.length];
-  for (let k = 0; k < 3; k++) g.drawImage(SYM[row[0]], mx + 24 + k * 16, my + 173, 12, 12);
-  text('→ ' + row[1], mx + 76, my + 172, 2, row[0] === 'heart' ? '#ff8a9a' : '#ffe14d', '#000', 0, 'l');
+  const rows = [['heart', 'REVIVE'], ['seven', '3 TOKENS'], ['bell', '100 COINS'], ['coin', '50 COINS']], row = rows[(tick / 90 | 0) % rows.length];
+  for (let k = 0; k < 3; k++) g.drawImage(SYM[row[0]], mx + 20 + k * 15, my + 173, 12, 12);
+  text('→ ' + row[1], mx + 66, my + 172, 2, row[0] === 'heart' ? '#ff8a9a' : '#ffe14d', '#000', 0, 'l');
 
   // credits + spin button
-  rr(12, 196, 100, 28, ol); R(14, 198, 96, 24, '#200808');
-  g.drawImage(coinSmall, mx + 20, my + 203, 14, 14);
-  text(String(bank).padStart(3, '0'), mx + 40, my + 203, 2, '#ff9a30', '#000', 0, 'l');
+  rr(12, 196, 146, 28, ol); R(14, 198, 142, 24, '#200808');
+  g.drawImage(tokenSmall, mx + 20, my + 203, 14, 14);
+  text(String(Math.min(tokens, 99)).padStart(2, '0'), mx + 38, my + 203, 2, '#f0a0ff', '#000', 0, 'l');
+  g.drawImage(coinSmall, mx + 72, my + 203, 14, 14);
+  text(String(Math.min(bank, 9999)).padStart(4, '0'), mx + 90, my + 203, 2, '#ff9a30', '#000', 0, 'l');
   const pressed = s.phase === 'spin', bx = mx + MW - 34, by = my + 210 + (pressed ? 2 : 0);
-  text('SPIN', mx + 116, my + 203, 2, '#fff8d8', '#000', 0, 'l');
   pcircle(bx, my + 212, 14, ol); pcircle(bx, by, 12, pressed ? '#a01028' : '#f83850'); if (!pressed) pcircle(bx - 3, by - 3, 4, '#ffb0bc');
 
   // messages + give up
   const ty = my + 262;
   if (s.phase === 'idle') {
     if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO SPIN', LW / 2, ty, 3, '#fff', '#543847', 2);
-    text('ONE SPIN: 3 COINS', LW / 2, ty + 32, 2, '#ffe14d', '#543847');
+    text(tokens > 0 ? 'ONE SPIN: 1 TOKEN' : 'ONE SPIN: 50 COINS', LW / 2, ty + 32, 2, '#ffe14d', '#543847');
   } else if (s.phase === 'result') {
     text(s.msg, LW / 2, ty, 3, s.res === 'win' ? '#ffe14d' : '#fca048', '#543847', 2);
-    text(bank < SPIN_COST ? 'OUT OF COINS' : ACT + ' TO SPIN AGAIN', LW / 2, ty + 32, 2, '#fff', '#543847');
+    text(!canSpin() ? 'NO TOKENS LEFT' : ACT + ' TO SPIN AGAIN', LW / 2, ty + 32, 2, '#fff', '#543847');
   } else if (party) {
     const cols = ['#ffe14d', '#fff', '#ff8a9a'];
     text(s.msg, LW / 2, ty - 4, 5, cols[(tick >> 2) % 3], '#c2310c', 3);
@@ -1580,7 +1630,7 @@ function draw() {
     drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + dn, false, pal, teeth);
   }
 
-  for (const c of coins) if (!c.pipe || c.pipe.intro >= INTRO) drawCoin(c);
+  for (const c of coins) if (c.token) drawToken(c); else if (!c.pipe || c.pipe.intro >= INTRO) drawCoin(c);
   if (state === 'revive') drawBeam();
   if (boss) drawBoss();
   for (const s of shots) drawShot(s);
