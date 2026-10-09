@@ -698,6 +698,7 @@ function update() {
     bird.vy = Math.min(MAXV, bird.vy + GRAV); bird.y += bird.vy;
     bird.rot = bird.vy < 2 ? Math.max(-0.4, bird.rot - 0.2) : Math.min(Math.PI / 2, bird.rot + 0.07);
     if (bird.inv > 0) bird.inv--;
+    if (bird.y < -BIRD_R && state === 'play') crash(false);                  // flew off the top of the screen
     if (bird.y < -20) { bird.y = -20; bird.vy = 0; }
     if (bird.y + 12 >= GY) { bird.y = GY - 12; if (state === 'play') crash(true); else { state = 'over'; overT = 0; } }
   }
