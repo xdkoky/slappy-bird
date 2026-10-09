@@ -58,8 +58,9 @@ const ACT = TOUCH ? 'TAP' : 'SLAP';
 const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, window.SAVED || {});
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
+let bank = SAVED.coins | 0;   // coins carry over between runs
 function save() {
-  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen };
+  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank };
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -217,6 +218,92 @@ const SFX = {
     const o = osc('square', t, 0.05, up ? 1400 : 1000), lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4000;
     o.connect(lp); lp.connect(gn); route(gn, 0.1);
   },
+  coin(big) { // quick bright "bling", a sparkly triple for big coins
+    const t = ac.currentTime, seq = big ? [1568, 2093, 3136] : [1975.5, 2637];
+    seq.forEach((f, i) => {
+      const gn = ac.createGain(), d = i === seq.length - 1 ? 0.3 : 0.06; env(gn.gain, t + i * 0.05, 0.002, big ? 0.2 : 0.16, d);
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000;
+      osc('square', t + i * 0.05, d, f).connect(lp); lp.connect(gn); route(gn, 0.3);
+    });
+  },
+  lever() { // ratchet clicks + clunk
+    const t = ac.currentTime;
+    for (let i = 0; i < 6; i++) {
+      const n = noise(t + i * 0.03, 0.02), bp = ac.createBiquadFilter(), gn = ac.createGain();
+      bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 3; env(gn.gain, t + i * 0.03, 0.001, 0.35, 0.018); n.connect(bp); bp.connect(gn); route(gn, 0.05);
+    }
+    const o = osc('sine', t + 0.2, 0.14, 160, 55), og = ac.createGain(); env(og.gain, t + 0.2, 0.002, 0.7, 0.13); o.connect(og); route(og, 0.1);
+  },
+  tick() {
+    const t = ac.currentTime, gn = ac.createGain(); env(gn.gain, t, 0.001, 0.05, 0.015);
+    osc('square', t, 0.02, 2600).connect(gn); route(gn, 0);
+  },
+  reelStop() { // heavy thunk
+    const t = ac.currentTime, o = osc('sine', t, 0.12, 200, 70), og = ac.createGain(); env(og.gain, t, 0.002, 0.7, 0.11); o.connect(og); route(og, 0.1);
+    const n = noise(t, 0.04), lp = ac.createBiquadFilter(), ng = ac.createGain();
+    lp.type = 'lowpass'; lp.frequency.value = 1800; env(ng.gain, t, 0.001, 0.5, 0.035); n.connect(lp); lp.connect(ng); route(ng, 0.1);
+  },
+  heartbeat() {
+    const t = ac.currentTime;
+    [0, 0.17].forEach((dt, i) => { const o = osc('sine', t + dt, 0.16, 75, 38), og = ac.createGain(); env(og.gain, t + dt, 0.004, i ? 0.6 : 0.9, 0.15); o.connect(og); route(og, 0.05); });
+  },
+  payout(n) { // a cascade of coin dings
+    const t = ac.currentTime;
+    for (let i = 0; i < Math.min(n, 12); i++) {
+      const gn = ac.createGain(); env(gn.gain, t + i * 0.07, 0.002, 0.14, 0.12);
+      osc('square', t + i * 0.07, 0.13, i % 2 ? 2637 : 1975.5).connect(gn); route(gn, 0.3);
+    }
+  },
+  jackpot() { // ringing bells, then the victory jingle
+    const t = ac.currentTime;
+    for (let i = 0; i < 14; i++) {
+      const gn = ac.createGain(); env(gn.gain, t + i * 0.055, 0.002, 0.13, 0.08);
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000;
+      osc('square', t + i * 0.055, 0.09, i % 2 ? 2093 : 1568).connect(lp); lp.connect(gn); route(gn, 0.35);
+    }
+    setTimeout(() => sfx('victory'), 800);
+  },
+  lose() { // sad trombone
+    const t = ac.currentTime;
+    [[196, 0, 0.26], [185, 0.3, 0.26], [174.6, 0.6, 0.26], [164.8, 0.9, 0.8]].forEach(([f, dt, d], i) => {
+      const o = osc('sawtooth', t + dt, d, f), lp = ac.createBiquadFilter(), gn = ac.createGain();
+      lp.type = 'lowpass'; lp.Q.value = 3;
+      lp.frequency.setValueAtTime(400, t + dt); lp.frequency.linearRampToValueAtTime(1300, t + dt + 0.08); lp.frequency.linearRampToValueAtTime(600, t + dt + d);
+      if (i === 3) { const lfo = osc('sine', t + dt, d, 6), lg = ac.createGain(); lg.gain.value = 5; lfo.connect(lg); lg.connect(o.frequency); }
+      env(gn.gain, t + dt, 0.03, 0.22, d); o.connect(lp); lp.connect(gn); route(gn, 0.25);
+    });
+  },
+  choir() { // heavenly "aah": a C major chord of detuned voices through vowel formants, plus chimes and an echo
+    const t = ac.currentTime, dur = 3.4;
+    const echo = ac.createDelay(1), fb = ac.createGain(); echo.delayTime.value = 0.27; fb.gain.value = 0.38;
+    echo.connect(fb); fb.connect(echo); route(echo, 0.6);
+    const bus = ac.createGain(), out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(0.5, t + 0.7);
+    out.gain.setValueAtTime(0.5, t + 2.3); out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    [[800, 6, 1], [1150, 8, 0.5], [2900, 10, 0.22]].forEach(([f, q, v]) => {
+      const bp = ac.createBiquadFilter(), gv = ac.createGain(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q; gv.gain.value = v;
+      bus.connect(bp); bp.connect(gv); gv.connect(out);
+    });
+    route(out, 0.8); out.connect(echo);
+    const vib = osc('sine', t, dur, 5.2), vg = ac.createGain(); vg.gain.value = 0.006; vib.connect(vg);
+    for (const f of [130.81, 261.63, 329.63, 392, 523.25, 659.25, 783.99]) for (const cents of [-7, 7]) {
+      const o = ac.createOscillator(), k = Math.pow(2, cents / 1200), pg = ac.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(f * k * 0.94, t); o.frequency.exponentialRampToValueAtTime(f * k, t + 0.35);
+      pg.gain.value = f * k; vg.connect(pg); pg.connect(o.frequency);   // vibrato scaled to pitch
+      const vgain = ac.createGain(); vgain.gain.value = 0.09; o.connect(vgain); vgain.connect(bus);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    [1046.5, 1318.5, 1568, 2093, 2637, 3136].forEach((f, i) => {   // angelic chime arpeggio
+      const ts = t + 0.2 + i * 0.11;
+      [[f, 0.16, 1.4], [f * 2.76, 0.05, 0.5]].forEach(([fr, v, d]) => {
+        const gn = ac.createGain(); env(gn.gain, ts, 0.002, v, d); osc('sine', ts, d, fr).connect(gn); route(gn, 0.6); gn.connect(echo);
+      });
+    });
+    const n = noise(t, 1), hp = ac.createBiquadFilter(), ng = ac.createGain();     // shimmer
+    n.loop = true; hp.type = 'highpass'; hp.frequency.value = 7000;
+    ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(0.06, t + 0.8); ng.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    n.connect(hp); hp.connect(ng); route(ng, 0.6);
+  },
 };
 function sfx(name, arg) { audioInit(); if (!muted && ac) try { SFX[name](arg); } catch {} }
 
@@ -232,7 +319,7 @@ const FONT = {
   0:[14,17,19,21,25,17,14],1:[4,12,4,4,4,4,14],2:[14,17,1,2,4,8,31],3:[31,2,4,2,1,17,14],
   4:[2,6,10,18,31,2,2],5:[31,16,30,1,1,17,14],6:[6,8,16,30,17,17,14],7:[31,1,2,4,8,8,8],
   8:[14,17,17,14,17,17,14],9:[14,17,17,15,1,2,12],
-  '!':[4,4,4,4,4,0,4],'<':[2,4,8,16,8,4,2],'>':[8,4,2,1,2,4,8],'-':[0,0,0,31,0,0,0],
+  '!':[4,4,4,4,4,0,4],'<':[2,4,8,16,8,4,2],'>':[8,4,2,1,2,4,8],'-':[0,0,0,31,0,0,0],'+':[0,4,4,31,4,4,0],
   '.':[0,0,0,0,0,12,12],':':[0,12,12,0,12,12,0],'?':[14,17,1,2,4,0,4],'/':[1,1,2,4,8,16,16],' ':[0,0,0,0,0,0,0],
   '←':[0,4,8,31,8,4,0],'→':[0,4,2,31,2,4,0],
 };
@@ -371,6 +458,29 @@ const HEART = ['.kk.kk.', 'kwrkrrk', 'krrrrrk', 'krrrrrk', '.krrrk.', '..krk..',
 const heartFull = sprite(HEART, { k:'#543847', r:'#f83850', w:'#ffd0d8' });
 const heartEmpty = sprite(HEART, { k:'#543847', r:'#6a4a58', w:'#6a4a58' });
 
+// coins: small ones are worth 1, big ones (risky spots) are worth 3
+const GOLD = { k:'#5a3a10', y:'#f8c81c', Y:'#fff4a0', o:'#c8860c' };
+const coinSmall = sprite(['..kkk..', '.kYyyk.', 'kYyYyok', 'kYyYyok', 'kYyYyok', '.kyyok.', '..kkk..'], GOLD);
+// slot machine reel symbols (12x12)
+const SYM = {
+  heart: sprite([
+    '..kkk..kkk..', '.kwwrkkrrrk.', 'kwwrrrrrrrrk', 'kwrrrrrrrrRk', 'krrrrrrrrrRk', 'krrrrrrrrRRk',
+    '.krrrrrrRRk.', '..krrrrRRk..', '...krrRRk...', '....kRRk....', '.....kk.....'], { k:'#3a1020', r:'#f83850', R:'#c01838', w:'#ffd0d8' }),
+  seven: sprite([
+    'kkkkkkkkkkk.', 'kwrrrrrrrrk.', 'krrrrrrrrRk.', 'kkkkkkkrrRk.', '.....krrRk..', '....krrRk...',
+    '...krrRk....', '...krrRk....', '..krrRk.....', '..krrRk.....', '..krrRk.....', '..kkkkk.....'], { k:'#10204a', r:'#3c8cf0', R:'#2050b0', w:'#c0e0ff' }),
+  bell: sprite([
+    '.....kk.....', '....kYyk....', '...kYyyyk...', '..kYyyyyok..', '..kYyyyyok..', '..kYyyyyok..',
+    '.kYyyyyyyok.', '.kYyyyyyyok.', 'kYyyyyyyyyok', 'kkkkkkkkkkkk', '....kook....', '.....kk.....'], GOLD),
+  coin: sprite([
+    '...kkkkkk...', '.kkYYYYyykk.', '.kYYyyyyyok.', 'kYYyyYYyyyok', 'kYyyyYoyyyok', 'kYyyyYoyyyok',
+    'kYyyyYoyyyok', 'kYyyyYoyyyok', 'kYyyyyyyyook', '.kyyyyyyyok.', '.kkooooookk.', '...kkkkkk...'], GOLD),
+  skull: sprite([
+    '...kkkkkk...', '..kwwwwwwk..', '.kwwwwwwwwk.', 'kwwwwwwwwwgk', 'kwkkkwwkkkgk', 'kwkkkwwkkkgk',
+    'kwwwwkkwwwgk', '.kwwwwwwwgk.', '..kwkwkwkk..', '..kwwwwwgk..', '...kkkkkk...'], { k:'#2a2030', w:'#f0ece0', g:'#b8b0a8' }),
+};
+const birdWhite = silhouette(birdFrames[1]);
+
 // seeded RNG for a deterministic, tileable background
 let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 const bg = (() => {
@@ -445,21 +555,20 @@ function pcircle(cx, cy, r, col) {
 
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
-// Font has A-Z 0-9 and ! < > - . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 1;
+// Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
+const NOTES_VERSION = 2;
 const PATCH_NOTES = [
-  { title: 'BOSS UPDATE', items: [
-    { h: 'PINK MEANS PARRY', col: '#e0309a', t: 'ONLY PINK SHOTS CAN BE HIT BACK. EVERYTHING ELSE HURTS - DODGE IT!' },
-    { h: 'KING CROW', t: 'THE FIRST BOSS IS NOW A TUTORIAL. ALL ITS SHOTS ARE PINK.' },
+  { title: 'COINS', items: [
+    { h: 'GRAB THEM', col: '#c8860c', t: 'COINS SIT IN THE GAPS. YOU KEEP THEM BETWEEN RUNS.' },
+    { h: 'BIG COINS ARE WORTH 3', col: '#c2310c', t: 'THEY HIDE IN RISKY SPOTS. GO FOR IT OR PLAY IT SAFE?' },
   ] },
-  { title: 'NEW BOSSES', items: [
-    { h: 'MECHA CROW', col: '#2a8ab8', t: 'GATLING STREAMS AND SHORT BURSTS BETWEEN SHOTS.' },
-    { h: 'THUNDER HAWK', col: '#b08010', t: 'WALLS WITH ONE GAP AND SHOTS THAT RAIN DOWN.' },
-    { h: 'CROW OMEGA', col: '#a02c40', t: 'BIG. FANS AND RINGS OF FIRE.' },
+  { title: 'LUCKY SLOTS', items: [
+    { h: 'CRASHED? SPIN!', col: '#c01838', t: 'A SLOT MACHINE SHOWS UP WHEN YOU DIE. ONE SPIN COSTS 3 COINS.' },
+    { h: '3 HEARTS REVIVE YOU', col: '#f83850', t: 'SEVENS - BELLS AND COINS PAY OUT MORE COINS.' },
   ] },
-  { title: 'ALSO NEW', items: [
-    { h: 'TOUGHER EACH LAP', t: 'BOSSES RETURN WITH MORE HP AND FASTER ATTACKS.' },
-    { h: 'MIND THE SKY', t: 'FLY OFF THE TOP OF THE SCREEN AND YOU CRASH. NO MORE SPAM PARRYING!' },
+  { title: 'REVIVE', items: [
+    { h: 'BACK FROM HEAVEN', col: '#c8860c', t: 'THE PIPES IN FRONT OF YOU BLOW UP AND YOU FLY ON.' },
+    { h: 'KEEPS YOUR SCORE', t: 'AND IN A BOSS FIGHT YOU GET ALL 3 HEARTS BACK.' },
   ] },
 ];
 let notesPage = notesSeen < NOTES_VERSION ? 0 : -1;   // -1 = closed
@@ -482,6 +591,8 @@ let overT = 0, flash = 0, hurtFlash = 0, fade = 0, shake = 0, newBest = false, d
 let popups = [], feathers = [], sparks = [], rings = [], booms = [], shots = [], paused = false;
 let spawned = 0, passedPipes = 0, nextBossAt = FIRST_BOSS, bossPending = false, boss = null, bossesBeaten = 0;
 let hearts = 3, combo = 0, parries = 0, hitstop = 0, slowmo = 0, banner = null, shownMove = false, shownChomp = false;
+const SPIN_COST = 3;
+let coins = [], coinBump = 0, slot = null, rev = null, halo = 0;   // world coins, slot machine, revive sequence
 const speed = () => 1.5 + Math.min(passedPipes * 0.02, 0.6) + bossesBeaten * 0.1;
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -491,6 +602,7 @@ function reset() {
   overT = 0; newBest = false; popups = []; feathers = []; sparks = []; rings = []; booms = []; shots = []; fade = 1;
   spawned = 0; passedPipes = 0; nextBossAt = FIRST_BOSS; bossPending = false; boss = null; bossesBeaten = 0;
   hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null; shownMove = shownChomp = false;
+  coins = []; slot = null; rev = null; halo = 0;
 }
 
 function setPaused(v) {
@@ -511,7 +623,8 @@ function flap(src) {
   audioInit();
   if (paused) paused = false;
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
-  if (state === 'dying') return;
+  if (state === 'dying' || state === 'revive') return;
+  if (state === 'slot') { if (slot.t > 30) spin(); return; }
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
   if (state === 'ready') state = 'play';
   bird.vy = FLAP;
@@ -532,7 +645,7 @@ function crash(onGround) {
   sfx('hit'); flash = 1; shake = 7;
   for (const s of shots) s.dead = true;
   if (score > best) { best = score; newBest = true; save(); }
-  if (onGround) { state = 'over'; overT = 0; }
+  if (onGround) downed();
   else { state = 'dying'; dieSoundAt = tick + 14; }
 }
 
@@ -573,10 +686,11 @@ function spawnPipes() {
     let r = Math.random(), kind = r < d.chomp ? 'chomp' : r < d.chomp + d.move ? 'move' : 'static';
     if (d.e >= 10 && !shownMove) { kind = 'move'; shownMove = true; setBanner('MOVING PIPES!', 'STAY SHARP'); sfx('swoosh'); }
     else if (d.e >= 25 && !shownChomp) { kind = 'chomp'; shownChomp = true; setBanner('CHOMPERS!', 'MIND THE TEETH'); sfx('swoosh'); }
+    const prev = last;
     last = { x, top, gap: d.gap, kind, t: 0, passed: false, intro: x < LW ? -6 * n++ : INTRO,
       amp: kind === 'move' ? d.moveAmp : kind === 'chomp' ? d.chompAmp : 0,
       freq: kind === 'move' ? rand(0.022, 0.04) : rand(0.045, 0.065), phase: rand(0, 6.28) };
-    pipeShape(last); pipes.push(last);
+    pipeShape(last); pipes.push(last); addCoins(last, prev, d);
   }
 }
 
@@ -584,6 +698,172 @@ const circRect = (cx, cy, r, x, y, w, h) => {
   const nx = Math.max(x, Math.min(cx, x + w)), ny = Math.max(y, Math.min(cy, y + h));
   return (cx - nx) ** 2 + (cy - ny) ** 2 < r * r;
 };
+
+// ------------------------------------------------------------ coins
+// Coins ride along with a pipe (dx from its left edge). Small ones sit on the safe line through the gap;
+// big ones (worth 3) hug a cap or float far off the path between two pipes: go for it or play it safe.
+function addCoins(p, prev, d) {
+  if (spawned < 2) return;
+  const add = o => coins.push(Object.assign({ pipe: p, dx: 24, dy: 0, mode: 'mid', big: false, ph: rand(0, 6), x: p.x + 24, y: 0 }, o));
+  const r = Math.random();
+  if (r < 0.38) add({});
+  else if (r < 0.52) for (let i = 0; i < 3; i++) add({ dx: 4 + i * 20, dy: i === 1 ? -10 : 0 });
+  else if (r < 0.72 && d.e >= 3 && p.kind !== 'chomp') add({ mode: Math.random() < 0.5 ? 'top' : 'bot', big: true });
+  else if (r < 0.92 && d.e >= 3 && prev) {
+    const mid = ((prev.y0 + prev.y1) / 2 + (p.y0 + p.y1) / 2) / 2, side = mid > GY / 2 + 10 ? -1 : 1;
+    add({ mode: 'free', big: true, dx: (prev.x + 50 - p.x) / 2, y: clamp(mid + side * rand(100, 130), 34, GY - 28) });
+  }
+}
+function updateCoins(sp) {
+  for (const c of coins) {
+    const p = c.pipe;
+    if (!p) { if (state === 'play') c.x -= sp; }
+    else {
+      c.x = p.x + c.dx;
+      if (c.mode === 'mid') c.y = (p.y0 + p.y1) / 2 + c.dy;
+      else if (c.mode === 'top') c.y = p.y0 + 12;
+      else if (c.mode === 'bot') c.y = p.y1 - 12;
+    }
+    if (state !== 'play' || (p && p.intro < INTRO)) continue;
+    if (Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + (c.big ? 10 : 7)) {
+      const v = c.big ? 3 : 1; c.dead = true; bank += v; coinBump = 8;
+      popup('+' + v, c.x, c.y - 16, { sc: c.big ? 3 : 2, fill: '#ffe14d', ol: '#7a4a08', life: 30 });
+      burst(c.x, c.y, c.big ? 16 : 7, ['#fff4a0', '#f8c81c', '#fff'], c.big ? 3.5 : 2.2, 16);
+      if (c.big) rings.push({ x: c.x, y: c.y, r: 6, dr: 3, life: 12, col: '#fff4a0' });
+      sfx('coin', c.big);
+    }
+  }
+  coins = coins.filter(c => !c.dead && c.x > -30 && (!c.pipe || c.pipe.x > -60));
+  if (coinBump > 0) coinBump--;
+}
+
+// ------------------------------------------------------------ death slot machine
+// The result is drawn first, then each reel is steered to land on its symbol (constant spin, then a
+// decelerating stop). Two hearts on the first reels stretches the last one out for suspense.
+const SYMS = ['heart', 'seven', 'bell', 'coin', 'skull'];
+const STRIP = ['heart', 'skull', 'coin', 'bell', 'heart', 'coin', 'seven', 'skull', 'bell', 'heart', 'coin', 'skull', 'bell', 'coin', 'heart', 'skull'];
+const REEL_OFF = [0, 5, 11];
+const PAY = { seven: 30, bell: 10, coin: 5 };
+const symAt = (i, n) => STRIP[(((n + REEL_OFF[i]) % STRIP.length) + STRIP.length) % STRIP.length];
+const pick = a => a[Math.random() * a.length | 0];
+function rollOutcome() {
+  const r = Math.random(), three = s => [s, s, s];
+  if (r < 0.25) return three('heart');
+  if (r < 0.28) return three('seven');
+  if (r < 0.34) return three('bell');
+  if (r < 0.46) return three('coin');
+  if (r < 0.50) return three('skull');
+  if (r < 0.66) return ['heart', 'heart', pick(SYMS.slice(1))];      // so close...
+  let o; do o = [0, 1, 2].map(() => pick(SYMS)); while (o[0] === o[1] && o[1] === o[2]); return o;
+}
+function downed() {
+  save();
+  if (bank >= SPIN_COST) {
+    state = 'slot';
+    slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0,
+      reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
+  } else { state = 'over'; overT = 0; }
+}
+function spin() {
+  const s = slot;
+  if (s.phase === 'spin' || s.phase === 'jackpot' || bank < SPIN_COST) return;
+  bank -= SPIN_COST; save(); s.spins++;
+  s.out = rollOutcome(); s.phase = 'spin'; s.msg = ''; s.res = ''; s.pull = 0;
+  s.suspense = s.out[0] === 'heart' && s.out[1] === 'heart';
+  s.reels.forEach((r, i) => {
+    r.from = r.pos = Math.round(r.pos); r.t = 0; r.T1 = 34 + i * 20; r.Td = i === 2 && s.suspense ? 120 : 22; r.done = false;
+    let to = Math.ceil(r.from + 0.75 * (r.T1 + r.Td / 2)); while (symAt(i, to) !== s.out[i]) to++;
+    r.to = to; r.v = (to - r.from) / (r.T1 + r.Td / 2);
+  });
+  sfx('lever');
+}
+function updateSlot() {
+  const s = slot; s.t++;
+  if (s.pull >= 0 && ++s.pull > 30) s.pull = -1;
+  if (s.phase === 'spin') {
+    s.reels.forEach((r, i) => {
+      if (r.done) return;
+      const before = r.pos; r.t++;
+      if (r.t < r.T1) r.pos = r.from + r.v * r.t;
+      else { const u = Math.min(r.t - r.T1, r.Td); r.pos = r.from + r.v * r.T1 + r.v * (u - u * u / (2 * r.Td)); }
+      if (Math.floor(r.pos) !== Math.floor(before) && tick - s.lastTick >= 3) { s.lastTick = tick; sfx('tick'); }
+      if (r.t >= r.T1 + r.Td) {
+        r.pos = r.to; r.done = true; r.bounce = 10; shake = Math.max(shake, 2); sfx('reelStop');
+        if (i === 1 && s.suspense) sfx('heartbeat');
+      }
+    });
+    if (s.suspense && s.reels[1].done && !s.reels[2].done && s.reels[2].t % 36 === 0) sfx('heartbeat');
+    if (s.reels.every(r => r.done)) resolveSpin();
+  } else if (s.phase === 'jackpot') {
+    if (++s.jt % 6 === 0) burst(LW / 2 + rand(-80, 80), rand(120, 200), 6, ['#f83850', '#ffd0d8', '#fff', '#ffe14d'], 3, 30, 4);
+    if (s.jt >= 130) startRevive();
+  } else if (s.t > 30 && --s.count <= 0) giveUp();
+  for (const r of s.reels) if (r.bounce > 0) r.bounce--;
+}
+function resolveSpin() {
+  const s = slot, o = s.out, three = o[0] === o[1] && o[1] === o[2];
+  if (three && o[0] === 'heart') {
+    s.phase = 'jackpot'; s.jt = 0; s.res = 'jackpot'; s.msg = 'JACKPOT!';
+    flash = 0.6; shake = 10; sfx('jackpot'); return;
+  }
+  s.phase = 'result'; s.count = 540;
+  if (three && PAY[o[0]]) {
+    const n = PAY[o[0]]; bank += n; save(); coinBump = 8;
+    s.res = 'win'; s.msg = '+' + n + ' COINS'; sfx('payout', n);
+    burst(LW / 2, 200, 12 + n, ['#fff4a0', '#f8c81c', '#fff'], 4, 30, 4);
+  } else {
+    s.res = 'lose'; s.msg = three ? 'CURSED!' : o[0] === 'heart' && o[1] === 'heart' ? 'SO CLOSE!' : 'NO LUCK';
+    sfx('lose');
+  }
+  if (bank < SPIN_COST) s.count = 150;      // out of coins: game over after a moment
+}
+function giveUp() { state = 'over'; overT = 0; slot = null; }
+
+// ------------------------------------------------------------ revive
+// A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
+function startRevive() {
+  const ahead = pipes.filter(p => p.x + 52 > BIRD_X - 24).sort((a, b) => a.x - b.x);
+  const targets = ahead.slice(0, 1);
+  if (ahead[1] && ahead[1].x - BIRD_X < 300) targets.push(ahead[1]);
+  const next = ahead.find(p => !targets.includes(p) && p.x - BIRD_X < 360);
+  state = 'revive'; hearts = 3; combo = 0;
+  rev = { t: 0, y0: bird.y, rot: bird.rot, ty: next ? clamp((next.y0 + next.y1) / 2, 130, 290) : 210, targets };
+  if (boss) { boss.steps = []; boss.charge = 0; boss.cd = 120; }
+  sfx('choir');
+}
+function explodePipe(p) {
+  pipes = pipes.filter(q => q !== p);
+  for (const c of coins) if (c.pipe === p) c.pipe = null;      // its coins stay behind
+  const pal = PIPE_PALS[p.kind], x = p.x + 24, debris = [pal.H, pal.L, pal.M, pal.D, pal.k];
+  let k = 0;
+  for (let y = p.y0 - 16; y > -30; y -= 40) booms.push({ x: x + rand(-12, 12), y, t: -3 * k++, life: 22, r: rand(18, 28) });
+  k = 0;
+  for (let y = p.y1 + 16; y < GY; y += 40) booms.push({ x: x + rand(-12, 12), y, t: -3 * k++, life: 22, r: rand(18, 28) });
+  burst(x, p.y0 - 30, 26, debris, 6, 44, 6); burst(x, p.y1 + 30, 26, debris, 6, 44, 6);
+  burst(x, (p.y0 + p.y1) / 2, 18, ['#fff', '#ffe14d', '#ff8030'], 5, 26, 4);
+  rings.push({ x, y: (p.y0 + p.y1) / 2, r: 10, dr: 8, life: 22, col: '#fff' });
+  sfx('explode', true); shake = 16; flash = Math.max(flash, 0.45);
+}
+function updateRevive() {
+  const r = rev, t = ++r.t;
+  if (t < 34) bird.rot = r.rot * (1 - t / 34);
+  else if (t <= 96) {
+    const k = (t - 34) / 62, e = k < 0.5 ? 2 * k * k : 1 - (2 - 2 * k) ** 2 / 2;
+    bird.y = r.y0 + (r.ty - r.y0) * e; bird.rot = 0;
+  }
+  if (t > 20 && t % 2 === 0)
+    sparks.push({ x: BIRD_X + rand(-24, 24), y: bird.y + rand(-6, 22), vx: 0, vy: rand(-2.8, -1.2), life: 30, col: pick(['#fff', '#fff4a0', '#ffe14d']), sz: 2 });
+  if (t === 34 || t === 64) rings.push({ x: BIRD_X, y: bird.y, r: 8, dr: 3, life: 26, col: '#fff4a0' });
+  if (t === 74 && r.targets[0]) explodePipe(r.targets[0]);
+  if (t === 88 && r.targets[1]) explodePipe(r.targets[1]);
+  if (t === 100) {
+    flash = 0.9; halo = 180;
+    rings.push({ x: BIRD_X, y: bird.y, r: 12, dr: 7, life: 30, col: '#fff' });
+    burst(BIRD_X, bird.y, 30, ['#fff', '#fff4a0', '#ffe14d'], 5, 34, 4);
+    setBanner('REVIVED!', 'FLY ON', 'victory', 80);
+  }
+  if (t >= 112) { state = 'play'; bird.vy = FLAP; bird.inv = 150; rev = null; slot = null; sfx('wing'); }
+}
 
 // ------------------------------------------------------------ boss fight
 const ROMAN = ['', ' II', ' III', ' IV', ' V'];
@@ -829,7 +1109,7 @@ function update() {
     if (bird.inv > 0) bird.inv--;
     if (bird.y < -BIRD_R && state === 'play') crash(false);                  // flew off the top of the screen
     if (bird.y < -20) { bird.y = -20; bird.vy = 0; }
-    if (bird.y + 12 >= GY) { bird.y = GY - 12; if (state === 'play') crash(true); else { state = 'over'; overT = 0; } }
+    if (bird.y + 12 >= GY) { bird.y = GY - 12; if (state === 'play') crash(true); else downed(); }
   }
   if (tick === dieSoundAt) sfx('die');
 
@@ -847,6 +1127,10 @@ function update() {
     }
     pipes = pipes.filter(p => p.x > -60);
   }
+  updateCoins(sp);
+  if (state === 'slot') updateSlot();
+  if (state === 'revive') updateRevive();
+  if (halo > 0 && state === 'play') halo--;
   if (boss) updateBoss();
   updateShots();
 
@@ -1010,7 +1294,8 @@ function drawScoreboard(cx, py, w) {
 }
 
 function drawCompactHUD() {
-  if (state === 'play' || state === 'dying') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
+  if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
+  if (state !== 'slot') coinCounter(LW - 12, 16, 'r');
   if (TOUCH && state === 'play') pauseButton(14, 16);
   if (state === 'ready') {
     text('SLAPPY', LW / 2, 64, 6, '#ffd23f', '#543847', 4);
@@ -1030,14 +1315,16 @@ function drawCompactHUD() {
     if (overT > 18) drawScoreboard(LW / 2, Math.max(176, 520 - (overT - 18) * 24), 226);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
+      if (bank < SPIN_COST) text('3 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
       if (TOUCH) touchButtons(420); else drawMeter(414);
     }
   }
 }
 
 function drawWideHUD() {
-  if (state === 'play' || state === 'dying') text(score, LW / 2, 26, 6, '#fff', '#000', 3);
+  if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 26, 6, '#fff', '#000', 3);
   wideTopBar();
+  if (state !== 'slot') { const cw = tw(String(bank)) + 46; chip(28, 60, cw, 30); coinCounter(40, 68, 'l', true); }
   if (state === 'ready') {
     text('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#543847', 4);
     text('GET READY!', LW / 2, 150, 4, '#7fe05a', '#1f5410', 2);
@@ -1050,6 +1337,7 @@ function drawWideHUD() {
     if (overT > 18) drawScoreboard(LW / 2, Math.max(150, 520 - (overT - 18) * 24), 300);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 296, 3, '#fff', '#543847', 2);
+      if (bank < SPIN_COST) text('COLLECT 3 COINS TO SPIN FOR A REVIVE', LW / 2, 336, 2, '#ffe14d', '#543847');
       wideControls();
     }
   }
@@ -1073,10 +1361,145 @@ function drawShot(s) {
 }
 
 function drawBoom(b) {
+  if (b.t < 0) return;                     // delayed (chain explosions)
   const k = b.t / b.life, r = Math.round(b.r * (0.4 + k * 0.8) / 2) * 2;
   pcircle(b.x | 0, b.y | 0, r + 2, k < 0.5 ? '#ff8030' : '#8a7a80');
   pcircle(b.x | 0, b.y | 0, r, k < 0.3 ? '#fff' : k < 0.6 ? '#ffe14d' : '#c8b8b0');
   if (k < 0.5) pcircle(b.x | 0, b.y | 0, Math.max(2, r - 8), '#fff');
+}
+
+function drawCoin(c) {
+  const x = Math.round(c.x / 2) * 2, y = Math.round((c.y + Math.sin(tick * 0.08 + c.ph) * 2) / 2) * 2;
+  const f = ((tick / 7 + c.ph * 4) | 0) % 4;
+  if (c.big) {
+    if ((tick >> 3) & 1) pring(x, y, 16, '#fff4a0');            // "this one's worth it"
+    const w = [24, 18, 8, 18][f]; g.drawImage(SYM.coin, x - w / 2, y - 12, w, 24);
+    const sp = (tick + c.ph * 20) % 40;
+    if (sp < 10) { const s = sp < 5 ? 2 : 4; g.fillStyle = '#fff'; g.fillRect(x + 8 - s, y - 10, s * 2 + 2, 2); g.fillRect(x + 8, y - 10 - s, 2, s * 2 + 2); }
+  } else { const w = [14, 10, 4, 10][f]; g.drawImage(coinSmall, x - w / 2, y - 7, w, 14); }
+}
+function coinCounter(x, y, align, bare) {
+  const s = String(bank), w = 20 + tw(s), x0 = align === 'r' ? x - w : x, dy = coinBump > 4 ? -2 : 0;
+  g.drawImage(coinSmall, x0, y + dy, 14, 14);
+  text(s, x0 + 20, y + dy, 2, coinBump ? '#fff' : '#ffe14d', bare ? '#000' : '#543847', bare ? 0 : 2, 'l');
+}
+function drawHalo(cx, cy) {
+  for (let i = 0; i < 20; i++) {
+    const a = i / 20 * Math.PI * 2, x = Math.round((cx + Math.cos(a) * 11) / 2) * 2, y = Math.round((cy + Math.sin(a) * 4) / 2) * 2;
+    g.fillStyle = '#b07810'; g.fillRect(x - 1, y, 2, 2);
+    g.fillStyle = Math.sin(a) < 0 ? '#fff4a0' : '#ffe14d'; g.fillRect(x - 1, y - 2, 2, 2);
+  }
+}
+function drawBeam() {
+  const t = rev.t, k = t < 20 ? t / 20 : t > 96 ? Math.max(0, 1 - (t - 96) / 16) : 1;
+  if (!k) return;
+  g.fillStyle = `rgba(255,220,120,${0.14 * k})`; g.fillRect(0, 0, LW, LH);
+  const w = Math.round((34 + Math.sin(tick * 0.2) * 4) * k / 2) * 2, h = Math.round(bird.y) + 24;
+  g.fillStyle = `rgba(255,244,170,${0.3 * k})`; g.fillRect(BIRD_X - w, 0, w * 2, h);
+  g.fillStyle = `rgba(255,255,255,${0.4 * k})`; g.fillRect(BIRD_X - w / 2, 0, w, h);
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 14; i++) {                    // motes drifting down the beam
+    const mx = BIRD_X - w + ((i * 53) % Math.max(2, w * 2)), my = (i * 97 + tick * (2 + i % 3)) % h;
+    g.fillRect(Math.round(mx / 2) * 2, Math.round(my / 2) * 2, 2, 2);
+  }
+}
+
+// Pixel-art slot machine. All coordinates are relative to the cabinet's top-left (mx, my).
+function drawSlot() {
+  const s = slot, MW = 212, LV = 28, ol = '#2a1018';
+  const ein = 1 - (1 - clamp(s.t / 22, 0, 1)) ** 3, out = state === 'revive' ? rev.t / 30 : 0;
+  g.fillStyle = `rgba(20,12,24,${0.55 * ein * (1 - out)})`; g.fillRect(0, 0, LW, LH);
+  if (s.t <= 0) return;
+  const mx = Math.round((LW - MW - LV) / 4) * 2, my = Math.round(((wide ? 58 : 66) - (1 - ein) * 380 - out * out * 460) / 2) * 2;
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(mx + x, my + y, w, h); };
+  const rr = (x, y, w, h, c, cut = 2) => { R(x + cut, y, w - cut * 2, h, c); R(x, y + cut, w, h - cut * 2, c); };
+  const party = s.phase === 'jackpot', fast = s.phase === 'spin';
+
+  // countdown
+  if (s.phase === 'idle' || s.phase === 'result') {
+    const n = Math.max(0, Math.ceil(s.count / 60));
+    text('CONTINUE?', LW / 2 - 18, my - 50, 3, '#fff', '#543847', 2);
+    text(n, LW / 2 + 92, my - 54, 4, n <= 3 && (tick >> 3) & 1 ? '#f83850' : '#ffe14d', '#543847', 2);
+  }
+
+  // lever (behind the cabinet edge)
+  const pk = s.pull < 0 ? 0 : s.pull < 8 ? s.pull / 8 : Math.max(0, 1 - (s.pull - 8) / 20);
+  const ky = Math.round((70 + pk * 120) / 2) * 2, lx = MW + 12;
+  rr(MW - 2, 118, 16, 36, ol); R(MW, 120, 12, 32, '#8890a8'); R(MW, 120, 12, 4, '#d8dce8');
+  const top = Math.min(ky, 134), bot = Math.max(ky, 134);
+  R(lx - 2, top, 8, bot - top, ol); R(lx, top, 4, bot - top, '#d8dce8'); R(lx + 2, top, 2, bot - top, '#8890a8');
+  pcircle(mx + lx + 2, my + ky, 12, ol); pcircle(mx + lx + 2, my + ky, 10, '#e0203a'); pcircle(mx + lx, my + ky - 2, 4, '#ff8a9a');
+
+  // base + body
+  rr(-6, 232, MW + 12, 22, ol); R(-4, 236, MW + 8, 14, '#8a1428'); R(-4, 234, MW + 8, 2, '#f8c81c');
+  rr(0, 44, MW, 194, ol); R(2, 46, MW - 4, 188, '#c8283c');
+  R(4, 50, 4, 182, '#f05a5a'); R(MW - 10, 50, 6, 182, '#8a1428'); R(2, 46, MW - 4, 4, '#f8c81c');
+
+  // marquee with chasing bulbs
+  rr(0, 0, MW, 48, ol, 4); rr(2, 2, MW - 4, 44, '#f8c81c', 4); R(4, 40, MW - 8, 4, '#b07810'); rr(8, 8, MW - 16, 32, '#3a0c18');
+  const bulbs = []; for (let x = 8; x < MW - 8; x += 12) bulbs.push([x, 3], [MW - x - 4, 41]);
+  bulbs.forEach(([x, y], i) => {
+    const on = party ? (tick >> 2) & 1 : ((i >> 1) + (tick >> (fast ? 1 : 3))) % 3 === 0;
+    R(x, y, 4, 4, on ? '#fff4a0' : '#a06010'); if (on) R(x + 1, y + 1, 2, 2, '#fff');
+  });
+  g.drawImage(SYM.heart, mx + 16, my + 17, 12, 12); g.drawImage(SYM.heart, mx + MW - 28, my + 17, 12, 12);
+  text('LUCKY SLOTS', mx + MW / 2, my + 15, 2, party && (tick >> 2) & 1 ? '#fff' : '#ffe14d', '#c2310c', 2);
+
+  // reel window
+  const win = s.res === 'win' || party;
+  rr(12, 56, MW - 24, 106, win && (tick >> 3) & 1 ? '#fff4a0' : ol); R(14, 58, MW - 28, 102, '#d8dce8'); R(14, 156, MW - 28, 4, '#8890a8');
+  R(18, 62, MW - 36, 92, '#1a0c10');
+  const RY = 64, RH = 88, CH = 44, cy = RY + RH / 2;
+  s.reels.forEach((r, i) => {
+    const rx = 20 + i * 59, speed = r.done ? 0 : Math.abs(r.pos - (r.prevDraw ?? r.pos));
+    r.prevDraw = r.pos;
+    g.save(); g.beginPath(); g.rect(mx + rx, my + RY, 54, RH); g.clip();
+    R(rx, RY, 54, RH, '#fff8e8'); R(rx, RY, 4, RH, '#d8ccb0'); R(rx + 50, RY, 4, RH, '#c8bca0');
+    const bo = r.bounce ? Math.sin(r.bounce / 10 * Math.PI) * 5 : 0, base = Math.floor(r.pos);
+    for (let j = base - 2; j <= base + 2; j++) {
+      const y = cy + (r.pos - j) * CH + bo, h = 36 + Math.min(28, speed * 18);
+      if (y < RY - 40 || y > RY + RH + 40) continue;
+      g.drawImage(SYM[symAt(i, j)], mx + rx + 9, Math.round((my + y - h / 2) / 2) * 2, 36, Math.round(h / 2) * 2);
+    }
+    [0.5, 0.32, 0.18, 0.08].forEach((a, k) => {   // curved-drum shading
+      g.fillStyle = `rgba(40,10,20,${a})`; g.fillRect(mx + rx, my + RY + k * 6, 54, 6); g.fillRect(mx + rx, my + RY + RH - 6 - k * 6, 54, 6);
+    });
+    R(rx + 6, RY + 10, 2, 30, 'rgba(255,255,255,0.45)');
+    if (s.suspense && i === 2 && !r.done && s.reels[1].done && (tick >> 2) & 1) { g.fillStyle = 'rgba(248,56,80,0.25)'; g.fillRect(mx + rx, my + RY, 54, RH); }
+    g.restore();
+  });
+  // payline markers
+  for (const [dy, w] of [[-4, 2], [-2, 4], [0, 4], [2, 2]]) { R(12, cy + dy, w + 2, 2, '#f83850'); R(MW - 14 - w, cy + dy, w + 2, 2, '#f83850'); }
+  if (s.res && (tick >> 3) & 1) R(18, cy - 1, MW - 36, 2, 'rgba(248,56,80,0.7)');
+
+  // pay table (cycles)
+  rr(12, 168, MW - 24, 22, '#3a0c18');
+  const rows = [['heart', 'REVIVE'], ['seven', '+30'], ['bell', '+10'], ['coin', '+5']], row = rows[(tick / 90 | 0) % rows.length];
+  for (let k = 0; k < 3; k++) g.drawImage(SYM[row[0]], mx + 24 + k * 16, my + 173, 12, 12);
+  text('→ ' + row[1], mx + 76, my + 172, 2, row[0] === 'heart' ? '#ff8a9a' : '#ffe14d', '#000', 0, 'l');
+
+  // credits + spin button
+  rr(12, 196, 100, 28, ol); R(14, 198, 96, 24, '#200808');
+  g.drawImage(coinSmall, mx + 20, my + 203, 14, 14);
+  text(String(bank).padStart(3, '0'), mx + 40, my + 203, 2, '#ff9a30', '#000', 0, 'l');
+  const pressed = s.phase === 'spin', bx = mx + MW - 34, by = my + 210 + (pressed ? 2 : 0);
+  text('SPIN', mx + 116, my + 203, 2, '#fff8d8', '#000', 0, 'l');
+  pcircle(bx, my + 212, 14, ol); pcircle(bx, by, 12, pressed ? '#a01028' : '#f83850'); if (!pressed) pcircle(bx - 3, by - 3, 4, '#ffb0bc');
+
+  // messages + give up
+  const ty = my + 262;
+  if (s.phase === 'idle') {
+    if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO SPIN', LW / 2, ty, 3, '#fff', '#543847', 2);
+    text('ONE SPIN: 3 COINS', LW / 2, ty + 32, 2, '#ffe14d', '#543847');
+  } else if (s.phase === 'result') {
+    text(s.msg, LW / 2, ty, 3, s.res === 'win' ? '#ffe14d' : '#fca048', '#543847', 2);
+    text(bank < SPIN_COST ? 'OUT OF COINS' : ACT + ' TO SPIN AGAIN', LW / 2, ty + 32, 2, '#fff', '#543847');
+  } else if (party) {
+    const cols = ['#ffe14d', '#fff', '#ff8a9a'];
+    text(s.msg, LW / 2, ty - 4, 5, cols[(tick >> 2) % 3], '#c2310c', 3);
+  }
+  if ((s.phase === 'idle' || s.phase === 'result') && s.t > 30)
+    button(Math.round((LW - 140) / 2), ty + 56, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp);
 }
 
 function drawBoss() {
@@ -1157,6 +1580,8 @@ function draw() {
     drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + dn, false, pal, teeth);
   }
 
+  for (const c of coins) if (!c.pipe || c.pipe.intro >= INTRO) drawCoin(c);
+  if (state === 'revive') drawBeam();
   if (boss) drawBoss();
   for (const s of shots) drawShot(s);
 
@@ -1179,8 +1604,11 @@ function draw() {
   const frame = state === 'over' || (state !== 'ready' && bird.rot > 1.2) ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4];
   if (!(bird.inv > 0 && (tick >> 2) & 1)) {
     g.save(); g.translate(BIRD_X, Math.round(bird.y)); g.rotate(bird.rot);
-    g.drawImage(birdFrames[frame], -18, -12, 36, 24); g.restore();
+    g.drawImage(birdFrames[frame], -18, -12, 36, 24);
+    if (state === 'revive' && rev.t > 20) { g.globalAlpha = 0.3 + 0.25 * Math.sin(tick * 0.3); g.drawImage(birdWhite, -18, -12, 36, 24); g.globalAlpha = 1; }
+    g.restore();
   }
+  if ((state === 'revive' && rev.t > 30) || (halo > 0 && (halo > 40 || (tick >> 2) & 1))) drawHalo(BIRD_X, Math.round(bird.y) - 22);
 
   for (const p of popups) { g.globalAlpha = Math.min(1, p.life / 12); const hw = tw(p.s, p.sc) / 2 + 6; text(p.s, clamp(p.x, hw, LW - hw), p.y, p.sc, p.fill, p.ol); }
   g.globalAlpha = 1;
@@ -1188,6 +1616,7 @@ function draw() {
   // HUD
   if (wide) drawWideHUD(); else drawCompactHUD();
   if (state === 'play' || state === 'dying') drawBossHUD();
+  if (state === 'slot' || (state === 'revive' && rev.t < 30)) drawSlot();
   drawBanner();
   if (notesPage >= 0 && state === 'ready') drawNotes();
   if (paused) {
@@ -1303,6 +1732,7 @@ addEventListener('keydown', e => {
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
   else if (k === 'Escape') { if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused); }
+  else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready') { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
 screen.addEventListener('pointerdown', e => {
