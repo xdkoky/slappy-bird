@@ -169,6 +169,10 @@ const SFX = {
     const n = noise(t, 0.12), ng = ac.createGain(), bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500;
     env(ng.gain, t, 0.002, 0.3, 0.1); n.connect(bp); bp.connect(ng); route(ng, 0.1);
   },
+  pew() { // small pellet
+    const t = ac.currentTime, o = osc('square', t, 0.07, 1600, 500), gn = ac.createGain();
+    env(gn.gain, t, 0.002, 0.08, 0.06); o.connect(gn); route(gn, 0.1);
+  },
   parry(combo) { // bright metallic "TING" that climbs with the combo, plus a whoosh and body thump
     const t = ac.currentTime, f = 1046.5 * Math.pow(2, Math.min(combo - 1, 8) * 2 / 12);
     [[f, 0.5, 0.45], [f * 2.76, 0.18, 0.25], [f * 5.4, 0.08, 0.12]].forEach(([fr, v, d]) => {
@@ -328,11 +332,26 @@ const BOSS_WING = [
   ['kkkkkk..', 'kBBBBBk.', 'kBBBBBBk', '.kBBBBBk', '..kkBBBk', '....kkk.'],   // down
   ['....kkk.', '..kkBBBk', '.kBBBBBk', 'kBBBBBBk', 'kBBBBBk.', 'kkkkkk..'],   // up
 ];
+// The first boss is the tutorial: every shot is pink (parryable). After that the roster repeats,
+// tougher each lap. Only pink shots can be slapped back; everything else must be dodged.
+// rows: sprite row overrides (crests, visors), S: pixel scale, shot: colour of its hostile shots.
+const TUTORIAL_BOSS =
+  { name: 'KING CROW',  hp: 4, S: 4, shot: 'fire', moves: null,
+    pal: { k:'#1a1020', b:'#3c2c58', B:'#5e4888', e:'#ff2a2a', E:'#ffd0c0', y:'#f8b81c', Y:'#c07010', c:'#ffd23f', r:'#c01020' } };
 const BOSSES = [
-  { name: 'KING CROW',  hp: 4, pal: { k:'#1a1020', b:'#3c2c58', B:'#5e4888', e:'#ff2a2a', E:'#ffd0c0', y:'#f8b81c', Y:'#c07010', c:'#ffd23f', r:'#c01020' } },
-  { name: 'MECHA CROW', hp: 6, pal: { k:'#141c24', b:'#3c5468', B:'#7a98b0', e:'#30f0ff', E:'#e0ffff', y:'#c0c8d0', Y:'#707c88', c:'#ff5040', r:'#202830' } },
-  { name: 'CROW OMEGA', hp: 8, pal: { k:'#1c0810', b:'#5a1424', B:'#a02c40', e:'#ffe040', E:'#ffffff', y:'#ff7030', Y:'#a03810', c:'#c0f0ff', r:'#ffe040' } },
+  { name: 'MECHA CROW', hp: 6, S: 4, shot: 'plasma', moves: ['gatling', 'chain', 'chain', 'gatling', 'single'],
+    rows: { 0: '...........c............', 1: '...........k............', 7: '....kbkeEeeeekbbbbbbbk..' },
+    pal: { k:'#141c24', b:'#3c5468', B:'#7a98b0', e:'#30f0ff', E:'#e0ffff', y:'#c0c8d0', Y:'#707c88', c:'#ff5040', r:'#202830' } },
+  { name: 'THUNDER HAWK', hp: 6, S: 4, shot: 'volt', moves: ['wall', 'rain', 'wall', 'rain', 'zap'],
+    rows: { 0: '...........c.c.c.c......', 1: '..........ccccccc.......' },
+    pal: { k:'#201408', b:'#6a4020', B:'#a87038', e:'#ffe040', E:'#ffffff', y:'#ffd820', Y:'#b08010', c:'#fff4a0', r:'#402008' } },
+  { name: 'CROW OMEGA', hp: 8, S: 5, shot: 'fire', moves: ['fan', 'fan2', 'ring', 'fan', 'ring', 'gatling', 'wall'],
+    rows: { 0: '........c.......c.......', 1: '.........c.....c........' },
+    pal: { k:'#1c0810', b:'#5a1424', B:'#a02c40', e:'#ffe040', E:'#ffffff', y:'#ff7030', Y:'#a03810', c:'#c0f0ff', r:'#ffe040' } },
 ];
+// [outline, body, core] per shot colour; pink is reserved for parryable shots
+const SHOT_COLS = { pink: ['#4a1038', '#ff5cc8', '#ffd0f0'], fire: ['#3a1408', '#ff6a10', '#ffd040'],
+  plasma: ['#0c2030', '#30c8ff', '#e0ffff'], volt: ['#302008', '#ffd820', '#fffbe0'] };
 function silhouette(c) {
   const s = document.createElement('canvas'); s.width = c.width; s.height = c.height;
   const x = s.getContext('2d'); x.drawImage(c, 0, 0); x.globalCompositeOperation = 'source-in';
@@ -342,7 +361,7 @@ const bossArt = new Map();   // name -> [mouth][wing] frames + white silhouettes
 function bossFrames(def) {
   if (bossArt.has(def.name)) return bossArt.get(def.name);
   const f = [0, 1].map(open => [0, 1].map(up => {
-    const rows = BOSS_BODY.map((r, i) => (open && BOSS_OPEN[i]) || r);
+    const rows = BOSS_BODY.map((r, i) => (open && BOSS_OPEN[i]) || (def.rows && def.rows[i]) || r);
     const c = sprite(rows, def.pal); c.getContext('2d').drawImage(sprite(BOSS_WING[up], def.pal), 12, up ? 6 : 10);
     return { img: c, white: silhouette(c) };
   }));
@@ -467,7 +486,7 @@ function flap(src) {
   bird.vy = FLAP;
   // a slap/flap while a fireball is close knocks it back
   let target = null, bd = PARRY_R;
-  for (const s of shots) if (!s.refl) { const d = Math.hypot(s.x - BIRD_X, s.y - bird.y); if (d < bd) { bd = d; target = s; } }
+  for (const s of shots) if (s.pink && !s.refl) { const d = Math.hypot(s.x - BIRD_X, s.y - bird.y); if (d < bd) { bd = d; target = s; } }
   if (target) { parry(target, bd); return; }
   sfx('wing');
   if (src === 'slap') {
@@ -536,32 +555,110 @@ const circRect = (cx, cy, r, x, y, w, h) => {
 };
 
 // ------------------------------------------------------------ boss fight
+const ROMAN = ['', ' II', ' III', ' IV', ' V'];
 function startBoss() {
-  const def = BOSSES[Math.min(bossesBeaten, BOSSES.length - 1)], extra = Math.max(0, bossesBeaten - 2) * 2;
-  const name = def.name + (bossesBeaten > 2 ? ' ' + (bossesBeaten - 1) : '');
-  boss = { def, name, lv: bossesBeaten, hp: def.hp + extra, maxHp: def.hp + extra, hpLag: def.hp + extra,
-    x: LW + 90, y: 190, t: 0, phase: 'warn', cd: 0, charge: 0, chargeLen: 0, pending: null, burst: 0, burstT: 0,
+  const n = bossesBeaten, tier = n ? Math.floor((n - 1) / BOSSES.length) : 0;
+  const def = n ? BOSSES[(n - 1) % BOSSES.length] : TUTORIAL_BOSS, hp = def.hp + tier * 2;
+  const name = def.name + (ROMAN[tier] ?? ' ' + (tier + 1));
+  boss = { def, name, lv: n, tier, hp, maxHp: hp, hpLag: hp,
+    x: LW + 90, y: 190, t: 0, phase: 'warn', cd: 0, charge: 0, chargeLen: 0, pending: null, last: null, steps: [], wait: 0,
     flash: 0, vy: 0, rot: 0 };
   bossPending = false; hearts = 3; combo = 0;
   setBanner('WARNING', name + ' APPROACHES', 'warning', 140);
   sfx('alarm');
 }
 
-function bossMouth() { return { x: boss.x - 44, y: boss.y + 2 }; }
+function bossMouth() { return { x: boss.x - 11 * boss.def.S, y: boss.y + boss.def.S / 2 }; }
+const aimAt = (m, ty = bird.y) => Math.atan2(ty - m.y, BIRD_X - m.x);
 
-function fire(angleOff = 0, wob = 0) {
-  const m = bossMouth(), dx = BIRD_X - m.x, dy = bird.y - m.y, d = Math.hypot(dx, dy);
-  const sp = Math.max(3.2 + boss.lv * 0.35, d / 115), a = Math.atan2(dy, dx) + angleOff;
-  shots.push({ x: m.x, y: m.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 8, refl: false, wob, t: 0 });
-  burst(m.x, m.y, 8, ['#ffb040', '#ff4020', '#fff'], 2.5, 14);
-  sfx('shoot');
+// One boss shot, aimed at the bird unless given an angle (a) or a velocity (vx, vy).
+// Only pink shots can be parried; the rest use the boss's own colour and must be dodged.
+function fire(o = {}) {
+  const b = boss, m = o.from || bossMouth(), pink = !!o.pink, d = Math.hypot(BIRD_X - m.x, bird.y - m.y);
+  const sp = o.sp || Math.max(3.2 + b.lv * 0.35, d / 115), a = (o.a ?? aimAt(m)) + (o.off || 0);
+  shots.push({ x: m.x, y: m.y, vx: o.vx ?? Math.cos(a) * sp, vy: o.vy ?? Math.sin(a) * sp, r: o.r || (pink ? 8 : 6),
+    pink, col: pink ? 'pink' : b.def.shot, refl: false, wob: o.wob || 0, g: o.g || 0, t: 0 });
+  if (o.quiet) return;
+  const c = SHOT_COLS[pink ? 'pink' : b.def.shot];
+  burst(m.x, m.y, pink ? 8 : 4, [c[1], c[2], '#fff'], 2.5, 14);
+  sfx(pink ? 'shoot' : 'pew');
+}
+
+// lobbed shot that arcs up and drops through (BIRD_X, bird.y + dy)
+function lob(dy, pink) {
+  const m = bossMouth(), dx = BIRD_X - m.x, T = clamp(-dx / 3, 45, 90), g = 0.14;
+  const ty = clamp(bird.y + dy, 20, GY - 10);
+  fire({ pink, quiet: true, vx: dx / T, vy: (ty - m.y - 0.5 * g * T * T) / T, g });
+}
+
+// An attack is a list of steps: { t: frames to wait before it, f: what to fire }.
+function attack(kind) {
+  const b = boss, T = b.tier, pel = 3.4 + T * 0.4 + b.lv * 0.1, st = [];
+  const at = (t, f) => st.push({ t, f });
+  const gapAng = () => { const m = bossMouth(); return 54 / Math.max(120, Math.hypot(BIRD_X - m.x, bird.y - m.y)); };
+  const fan = (offs, pinkMid) => { const s = gapAng(); for (const c of offs) fire({ off: c * s, sp: pel + 0.4, pink: pinkMid && c === 0, quiet: c !== offs[0] }); };
+  switch (kind) {
+    // tutorial moves (all pink)
+    case 'single': at(0, () => fire({ pink: true })); break;
+    case 'wave': at(0, () => fire({ pink: true, wob: 42 })); break;
+    case 'burst': for (let i = 0; i < 3; i++) at(i ? 18 : 0, () => fire({ pink: true })); break;
+    // long stream of small aimed pellets, then one pink shot
+    case 'gatling':
+      for (let i = 0; i < 7 + T * 3; i++) at(i ? 5 : 0, () => fire({ sp: pel + 0.6, r: 5, off: rand(-0.07, 0.07) }));
+      at(24, () => fire({ pink: true }));
+      break;
+    // pink shot, short pellet burst, pink shot, short pellet burst
+    case 'chain':
+      for (let k = 0; k < 2; k++) {
+        at(k ? 18 : 0, () => fire({ pink: true }));
+        for (let i = 0; i < 3 + T; i++) at(i ? 5 : 16, () => fire({ sp: pel + 0.8, r: 5 }));
+      }
+      break;
+    // fast pellets either side of a pink shot, then a scattered pellet burst
+    case 'zap':
+      at(0, () => { fan([-1, 1], false); fire({ pink: true }); });
+      for (let i = 0; i < 4 + T * 2; i++) at(i ? 6 : 22, () => fire({ sp: pel + 1, r: 5, off: rand(-0.12, 0.12) }));
+      break;
+    // fan with the pink shot in the middle
+    case 'fan': at(0, () => fan(T ? [0, -1, 1, -2, 2, -3, 3] : [0, -1, 1, -2, 2], true)); break;
+    // even fan the bird sits between, then a full fan
+    case 'fan2':
+      at(0, () => fan(T ? [-0.5, 0.5, -1.5, 1.5, -2.5, 2.5] : [-0.5, 0.5, -1.5, 1.5], false));
+      at(30, () => fan([0, -1, 1, -2, 2], true));
+      break;
+    // slow ring with the shot aimed at the bird pink, then a re-aimed hostile ring
+    case 'ring': {
+      const n = 14 + T * 4;
+      for (let k = 0; k < 2; k++) at(k ? 34 : 0, () => {
+        const a0 = aimAt(bossMouth());
+        for (let i = 0; i < n; i++) fire({ a: a0 + i * Math.PI * 2 / n, sp: 2.4 + T * 0.3, pink: !k && !i, quiet: i > 0 });
+      });
+      break;
+    }
+    // a column of shots crossing the screen with one gap near the bird, then a pink shot through the gap
+    case 'wall':
+      at(0, () => {
+        const gap = Math.max(72, 100 - T * 8), gy = clamp(bird.y + rand(-90, 90), 70, GY - 70);
+        for (let y = 14; y < GY - 4; y += 24) if (Math.abs(y - gy) > gap / 2) fire({ from: { x: boss.x - 10, y }, vx: -(2.4 + T * 0.3), vy: 0, quiet: true });
+        sfx('pew'); shake = Math.max(shake, 3);
+      });
+      at(34, () => fire({ pink: true }));
+      break;
+    // lobbed shots raining down around the bird, then a lobbed pink one right at it
+    case 'rain':
+      at(0, () => { for (const o of [-90, -40, 40, 90]) lob(o + rand(-12, 12), false); sfx('pew'); });
+      if (T) at(22, () => { for (const o of [-60, 0, 60]) lob(o, false); sfx('pew'); });
+      at(28, () => { lob(0, true); sfx('shoot'); });
+      break;
+  }
+  return st;
 }
 
 function updateBoss() {
   const b = boss; b.t++;
   b.flash = Math.max(0, b.flash - 1);
   b.hpLag += (b.hp - b.hpLag) * 0.05;
-  const tx = LW - (wide ? 120 : 62);
+  const tx = LW - (wide ? 120 : 14 + 12 * b.def.S);
   if (b.phase === 'warn') {
     if (b.t > 50) b.x += (tx - b.x) * 0.05;
     b.y = 190 + Math.sin(b.t * 0.05) * 20;
@@ -572,20 +669,19 @@ function updateBoss() {
     if (state !== 'play') return;
     const hpRatio = b.hp / b.maxHp;
     if (b.charge > 0) {
-      if (--b.charge === 0) {
-        const p = b.pending;
-        if (p === 'spread') { fire(-0.28); fire(0); fire(0.28); }
-        else if (p === 'wave') fire(0, 42);
-        else { fire(); if (p === 'burst') { b.burst = 2; b.burstT = 18; } }
-        b.cd = Math.max(48, 100 - b.lv * 12 - (1 - hpRatio) * 30);
+      if (--b.charge === 0) { b.steps = attack(b.pending); b.wait = b.steps[0].t; }
+    } else if (b.steps.length) {
+      if (--b.wait <= 0) {
+        do b.steps.shift().f(); while (b.steps.length && b.steps[0].t === 0);
+        if (b.steps.length) b.wait = b.steps[0].t;
+        else b.cd = b.lv ? Math.max(36, 84 - b.tier * 12 - (1 - hpRatio) * 26) : 100 - (1 - hpRatio) * 30;
       }
-    } else if (b.burst > 0) {
-      if (--b.burstT <= 0) { fire(); b.burst--; b.burstT = 18; }
     } else if (--b.cd <= 0) {
-      const pool = ['single', 'single', 'wave'];
-      if (b.lv >= 1 || hpRatio <= 0.5) pool.push('burst');
-      if (b.lv >= 2 || (b.lv >= 1 && hpRatio <= 0.6)) pool.push('spread');
-      b.pending = pool[Math.random() * pool.length | 0];
+      let pool = b.def.moves;
+      if (!pool) { pool = ['single', 'single', 'wave']; if (hpRatio <= 0.5) pool.push('burst'); }
+      let m = pool[Math.random() * pool.length | 0];
+      if (m === b.last && b.def.moves) m = pool[Math.random() * pool.length | 0];
+      b.pending = b.last = m;
       b.chargeLen = b.charge = Math.max(18, 30 - b.lv * 3);
       sfx('charge');
     }
@@ -650,21 +746,23 @@ function updateShots() {
     s.t++;
     if (!s.refl) {
       const d = Math.hypot(s.x - BIRD_X, s.y - bird.y);
-      s.inRange = d < PARRY_R && s.x > BIRD_X - 12;
+      s.inRange = s.pink && d < PARRY_R && s.x > BIRD_X - 12;
       const k = s.inRange ? 0.42 : 1;           // bullet-time while it's parryable
+      s.vy += s.g * k;
       s.x += s.vx * k; s.y += (s.vy + (s.wob ? Math.cos(s.t * 0.12) * s.wob * 0.12 : 0)) * k;
       if (state === 'play' && d < BIRD_R + s.r - 3) { s.dead = true; hurtBird(); }
     } else {
       if (boss && boss.phase === 'fight') {
         const dx = boss.x - s.x, dy = boss.y - s.y, d = Math.hypot(dx, dy) || 1;
         s.vx += (dx / d * 11 - s.vx) * 0.25; s.vy += (dy / d * 11 - s.vy) * 0.25;
-        if (d < 42) { s.dead = true; hitBoss(s); }
+        if (d < 10.5 * boss.def.S) { s.dead = true; hitBoss(s); }
       }
       s.x += s.vx; s.y += s.vy;
     }
-    if ((s.t & 1) === 0) sparks.push({ x: s.x, y: s.y, vx: -s.vx * 0.15 + rand(-.4, .4), vy: rand(-.4, .4), life: 12, col: s.refl ? '#ffe14d' : '#ff6020', sz: 4 });
+    const big = s.pink || s.refl;
+    if ((s.t & (big ? 1 : 3)) === 0) sparks.push({ x: s.x, y: s.y, vx: -s.vx * 0.15 + rand(-.4, .4), vy: rand(-.4, .4), life: 12, col: s.refl ? '#ffe14d' : SHOT_COLS[s.col][1], sz: big ? 4 : 2 });
     if (s.y > GY - s.r) { s.dead = true; burst(s.x, GY - 4, 10, ['#ff8030', '#ded895', '#fff'], 3, 18); }
-    if (s.x < -40 || s.x > LW + 80 || s.y < -80) s.dead = true;
+    if (s.x < -40 || s.x > LW + 80 || s.y < (s.g ? -400 : -80)) s.dead = true;
   }
   shots = shots.filter(s => !s.dead);
 }
@@ -908,8 +1006,10 @@ function drawShot(s) {
   const x = Math.round(s.x / 2) * 2, y = Math.round(s.y / 2) * 2, fl = (tick >> 1) & 1;
   if (s.refl) { pcircle(x, y, 10, '#543847'); pcircle(x, y, 8, '#ffe14d'); pcircle(x, y, 5, fl ? '#fff' : '#fff8c0'); }
   else {
-    if (s.inRange) pcircle(x, y, 12, fl ? '#fff' : '#ffe14d');
-    pcircle(x, y, 9, '#3a1018'); pcircle(x, y, 7, '#ff3a1a'); pcircle(x, y, 4, fl ? '#ffd040' : '#ffb040'); pcircle(x - 1, y - 1, 2, '#fff');
+    const [o, m, c] = SHOT_COLS[s.col];
+    if (s.inRange) pcircle(x, y, s.r + 4, fl ? '#fff' : '#ffe14d');
+    else if (s.pink) pring(x, y, s.r + 5 + ((tick >> 2) & 1) * 2, '#ff9ee0');   // sparkle: "you can hit this one"
+    pcircle(x, y, s.r + 1, o); pcircle(x, y, s.r - 1, m); pcircle(x, y, Math.max(2, s.r - 4), fl ? c : m); pcircle(x - 1, y - 1, 2, '#fff');
   }
 }
 
@@ -922,8 +1022,8 @@ function drawBoom(b) {
 
 function drawBoss() {
   const b = boss, f = bossFrames(b.def);
-  const open = b.charge > 0 || b.burst > 0 || (b.phase === 'dying') ? 1 : 0, up = (b.t >> 3) & 1;
-  const fr = f[open][up], S = 4, w = 24 * S, h = 20 * S;
+  const open = b.charge > 0 || b.steps.length || b.phase === 'dying' ? 1 : 0, up = (b.t >> 3) & 1;
+  const fr = f[open][up], S = b.def.S, w = 24 * S, h = 20 * S;
   g.save(); g.translate(Math.round(b.x / 2) * 2, Math.round(b.y / 2) * 2); g.rotate(b.rot);
   g.drawImage(b.flash > 0 && (b.flash >> 1) & 1 ? fr.white : fr.img, -w / 2, -h / 2, w, h);
   g.restore();
@@ -975,6 +1075,7 @@ function drawBanner() {
     text(b.text, LW / 2, cy - (b.sub ? 10 : 0) - sc * 3.5, sc, b.kind === 'warning' ? '#fff' : '#ffd23f', '#1a1020', 2);
   if (b.sub) text(b.sub, LW / 2, cy + sc * 3.5 - 4, 2, '#fff', '#1a1020');
   if (b.kind === 'warning' && bossesBeaten === 0 && b.t > 40) text(TOUCH ? 'TAP TO HIT THEM BACK!' : 'SLAP ITS FIREBALLS BACK!', LW / 2, cy + h / 2 + 10, 2, '#fff', '#c2310c');
+  if (b.kind === 'warning' && bossesBeaten === 1 && b.t > 40) text('ONLY PINK ONES BOUNCE!', LW / 2, cy + h / 2 + 10, 2, '#fff', '#c0208a');
 }
 
 function draw() {
