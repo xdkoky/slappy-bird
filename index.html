@@ -1798,7 +1798,16 @@ if (TOUCH) {
   for (const t of ['touchstart', 'touchmove', 'gesturestart', 'dblclick']) addEventListener(t, e => e.preventDefault(), { passive: false });
   addEventListener('touchend', () => audioInit());
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); else audioInit(); });
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Check for a new version whenever the app comes back to the foreground; once it's installed,
+  // reload at the next calm moment (title or game over screen) so a run is never interrupted.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+      setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
+    }).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadSW) updateReady = true; });
+  }
 }
 addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('blur', () => setPaused(true));
@@ -1806,7 +1815,9 @@ addEventListener('blur', () => setPaused(true));
 // ============================================================ main loop (fixed 60Hz simulation)
 const STEP = 1000 / 60, led = document.getElementById('led');
 let acc = 0, prev = performance.now();
+let updateReady = false;
 function loop(now) {
+  if (updateReady && (state === 'ready' || (state === 'over' && overT > 50))) { updateReady = false; location.reload(); }
   acc = Math.min(acc + now - prev, 250); prev = now;
   while (acc >= STEP) { if (!paused) update(); acc -= STEP; }
   level *= 0.9;
