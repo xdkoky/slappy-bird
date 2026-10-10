@@ -53,6 +53,7 @@
     text-transform:uppercase; letter-spacing:2px; color:#543847; background:#fff8d8; border:3px solid #543847; border-radius:0; outline:none; }
   #namebox button { font:700 15px Menlo, monospace; padding:9px 0; width:46%; border:3px solid #543847; color:#fff; background:#e86a17; }
   #namebox button[value=cancel] { background:#b4a88c; }
+  #namebox .msg { min-height:18px; margin:-6px 0 10px; font-size:13px; color:#c2310c; }
 </style>
 </head>
 <body>
@@ -61,6 +62,7 @@
 <div id="namebox"><form>
   <div>YOUR NAME</div>
   <input maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
+  <div class="msg"></div>
   <button type="submit" value="ok">OK</button> <button type="button" value="cancel">CANCEL</button>
 </form></div>
 <div id="monitor">
@@ -1510,7 +1512,10 @@ function lbCall(fn, body) {
   return fetch(LB_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
     method: 'POST', body: JSON.stringify(body),
     headers: { apikey: LB_KEY, 'Content-Type': 'application/json' },   // apikey only: works for sb_publishable_ and legacy anon keys
-  }).then(r => r.ok ? r.text().then(t => t ? JSON.parse(t) : null) : Promise.reject(r.status));
+  }).then(r => r.text().then(t => {
+    const v = t ? JSON.parse(t) : null;
+    return r.ok ? v : Promise.reject({ status: r.status, msg: (v && v.message) || '' });
+  }));
 }
 let lbSending = false, lbRetry = 4000;
 // Upload the best unsent score (and/or a name change). Retries next time if offline.
@@ -1519,7 +1524,11 @@ function lbFlush() {
   lbSending = true;
   const sc = player.pending;
   lbCall('submit_score', { p_id: player.id, p_secret: player.secret, p_name: player.name, p_score: sc })
-    .then(() => { if (player.pending === sc) player.pending = 0; player.named = true; save(); lbRetry = 4000; lb.data.week = lb.data.all = null; if (lb.open) lbLoad(); })
+    .then(stored => {
+      if (player.pending === sc) player.pending = 0;
+      if (typeof stored === 'string' && stored) player.name = stored;   // the server may add a number / refuse a taken name
+      player.named = true; save(); lbRetry = 4000; lb.data.week = lb.data.all = null; if (lb.open) lbLoad();
+    })
     .catch(() => { setTimeout(lbFlush, lbRetry); lbRetry = Math.min(lbRetry * 2, 120000); })   // offline / too fast: try again later
     .finally(() => { lbSending = false; });
 }
@@ -1577,12 +1586,15 @@ function drawLB() {
         for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly + 6, 4, 4); }
         ly += 18;
       }
-      if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 3, w - 16, 20); }
+      const nm = cleanName(r.name) || 'PLAYER';
+      if (r.dev) devRowBack(x + 8, ly - 3, w - 16, 20);
+      else if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 3, w - 16, 20); }
       const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
       text(r.rank, x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
-      text(cleanName(r.name) || 'PLAYER', x + 40, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
-      text(r.score, x + w - 14, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
+      if (r.dev) devName(nm, x + 40, ly, x + w - 20 - tw(String(r.score)));
+      else text(nm, x + 40, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
+      text(r.score, x + w - 14, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
       ly += 22;
     });
   }
@@ -1591,6 +1603,34 @@ function drawLB() {
   text(player.name, x + 14, y + h - 76, 2, '#c2310c', '#000', 0, 'l');
   button(x + w - 14 - 64, y + h - 82, 64, 28, 'EDIT', editName);
   button(Math.round(LW / 2 - 60), y + h - 42, 120, 30, 'DONE', closeLB);
+}
+
+// The developer's row: shimmering gold strip, wavy rainbow-gold name with a DEV badge and sparkles,
+// so everyone knows whose score to beat.
+function devRowBack(x, y, w, h) {
+  g.fillStyle = (tick >> 3) & 1 ? '#ffd23f' : '#ffb040'; g.fillRect(x - 2, y - 2, w + 4, h + 4);   // glowing gold rim
+  g.fillStyle = '#3a1450'; g.fillRect(x, y, w, h);
+  g.fillStyle = '#2a0c3a'; g.fillRect(x, y + h - 5, w, 5);
+  const sx = ((tick * 3) % (w + 60)) - 30;                 // shine sweeping across
+  g.fillStyle = 'rgba(255,220,140,0.28)';
+  for (let k = 0; k < 4; k++) g.fillRect(x + Math.max(0, Math.min(w - 4, sx + k * 4 - (k & 1) * 2)), y, 4, h);
+  for (let k = 0; k < 5; k++) {                            // twinkles around the strip
+    const ph = (tick + k * 37) % 60; if (ph > 14) continue;
+    const px = x + ((k * 71 + (tick / 60 | 0) * 53) % w), py = y + (k & 1 ? -4 : h + 1), sz = ph < 7 ? 2 : 1;
+    g.fillStyle = '#fff'; g.fillRect(px - sz, py, sz * 2 + 2, 2); g.fillRect(px, py - sz, 2, sz * 2 + 2);
+  }
+}
+function devName(nm, x, y, maxX) {
+  const cols = ['#ffffff', '#fff4a0', '#ffd23f', '#ffb040', '#ffd23f', '#fff4a0'];
+  for (let i = 0; i < nm.length; i++) {                    // each letter bobs and cycles colour
+    const dy = Math.round(Math.sin(tick * 0.15 + i * 0.7) * 1.5);
+    text(nm[i], x + i * 12, y + dy, 2, cols[((tick >> 2) + i) % cols.length], '#000', 0, 'l');
+  }
+  const bx = x + nm.length * 12 + 6;                       // DEV badge (if there's room before the score)
+  if (bx + 40 > maxX) return;
+  g.fillStyle = '#7a0c20'; g.fillRect(bx, y - 2, 40, 18);
+  g.fillStyle = (tick >> 4) & 1 ? '#f83850' : '#e0203a'; g.fillRect(bx + 2, y, 36, 14);
+  text('DEV', bx + 20, y + 1, 2, '#fff', '#000', 0);
 }
 
 // Name entry: a real text field (so the phone keyboard works), styled to match the game.
@@ -1602,13 +1642,21 @@ function editName() {
   inp.value = player.name; box.style.display = 'flex';
   setTimeout(() => { inp.focus(); inp.select(); }, 50);
 }
+function nameMsg(t) { document.querySelector('#namebox .msg').textContent = t; }
 function closeNameBox(ok) {
   const box = document.getElementById('namebox'), inp = box.querySelector('input');
-  if (ok) {
-    const n = cleanName(inp.value);
-    if (n && n !== player.name) { player.name = n; player.named = false; save(); lbFlush(); sfx('blip', true); }
-  }
-  inp.blur(); box.style.display = 'none'; nameBoxOpen = false;
+  const done = () => { inp.blur(); box.style.display = 'none'; nameBoxOpen = false; nameMsg(''); };
+  const n = ok ? cleanName(inp.value) : '';
+  if (!n || n === player.name) return done();
+  if (!LB_ON) { player.name = n; save(); sfx('blip', true); return done(); }
+  // names are unique: ask the server first, so a taken name can be refused right here
+  nameMsg('CHECKING...');
+  lbCall('submit_score', { p_id: player.id, p_secret: player.secret, p_name: n, p_score: 0 })
+    .then(stored => {
+      if (stored === n) { player.name = n; player.named = true; save(); lb.data.week = lb.data.all = null; if (lb.open) lbLoad(); sfx('blip', true); done(); }
+      else { if (typeof stored === 'string' && stored) { player.name = stored; save(); } nameMsg('THAT NAME IS TAKEN'); sfx('blip', false); inp.focus(); inp.select(); }
+    })
+    .catch(() => { player.name = n; player.named = false; save(); lbFlush(); done(); });   // offline: try it later
 }
 
 function notesButton(y) {
