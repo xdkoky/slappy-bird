@@ -738,6 +738,8 @@ function wrapText(str, max) {
 
 // ============================================================ game state
 const GRAV = 0.25, FLAP = -5.2, MAXV = 8, BIRD_R = 10, INTRO = 24;
+const HOVER_MAX = 150;                 // after a revive: up to 2.5s to get ready before gravity returns
+let hover = 0, hoverY = 240;
 const FIRST_BOSS = 15, BOSS_EVERY = 20, PARRY_R = 74;
 const bird = { y: 240, vy: 0, rot: 0, inv: 0 };
 let state = 'ready', tick = 0, score = 0, pipes = [], groundX = 0, bgX = 0;
@@ -757,7 +759,7 @@ function reset() {
   overT = 0; newBest = false; popups = []; feathers = []; sparks = []; rings = []; booms = []; shots = []; fade = 1;
   spawned = 0; passedPipes = 0; nextBossAt = FIRST_BOSS; bossPending = false; boss = null; bossesBeaten = 0;
   hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null;
-  coins = []; slot = null; rev = null; halo = 0; goals = []; confetti = []; flashes = []; shownNew = {};
+  coins = []; slot = null; rev = null; halo = 0; hover = 0; goals = []; confetti = []; flashes = []; shownNew = {};
 }
 
 // ------------------------------------------------------------ finish lines
@@ -880,6 +882,7 @@ function flap(src) {
   if (state === 'slot') { if (slot.t > 30) spin(); return; }
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
   if (state === 'ready') { state = 'play'; setupGoals(); }
+  hover = 0;
   bird.vy = FLAP;
   // a slap/flap while a fireball is close knocks it back
   let target = null, bd = PARRY_R;
@@ -1184,7 +1187,8 @@ function updateRevive() {
     burst(BIRD_X, bird.y, 30, ['#fff', '#fff4a0', '#ffe14d'], 5, 34, 4);
     setBanner('REVIVED!', 'FLY ON', 'victory', 80);
   }
-  if (t >= 112) { state = 'play'; bird.vy = FLAP; bird.inv = 150; rev = null; slot = null; sfx('wing'); }
+  // back in play, but the bird hovers in place (world frozen) until you tap or HOVER_MAX runs out
+  if (t >= 112) { state = 'play'; bird.vy = 0; bird.inv = 150; rev = null; slot = null; hover = HOVER_MAX; hoverY = bird.y; }
 }
 
 // ------------------------------------------------------------ boss fight
@@ -1423,6 +1427,14 @@ function update() {
   if (race.phase !== 'off' || race.panel) raceTick();
   if (hitstop > 0) { hitstop--; updateFX(); return; }                       // impact freeze
   if (slowmo > 0) { slowmo--; if (slowmo % 3) { updateFX(); return; } }      // final-blow slow motion
+  if (hover > 0 && state === 'play') {          // post-revive hover: the bird bobs, nothing else moves
+    if (--hover === 0) sfx('blip', false);
+    bird.y = hoverY + Math.sin(tick * 0.12) * 4; bird.vy = 0; bird.rot = 0;
+    if (hover % 30 === 0) rings.push({ x: BIRD_X, y: bird.y, r: 10, dr: 2, life: 20, col: '#fff4a0' });
+    if (banner && ++banner.t >= banner.life) banner = null;   // let the REVIVED! banner finish
+    if (halo > 0) halo--;
+    updateFX(); return;
+  }
   const sp = speed();
   if (race.phase === 'run' && state === 'play') race.myDist += sp;
   if (state === 'ready' || state === 'play') { groundX = (groundX + sp) % 24; bgX = (bgX + sp * 0.15) % 288; }
@@ -2535,6 +2547,12 @@ function draw() {
   if (raceOn()) drawRaceGhost();
   endForeground();
   drawConfetti();
+  if (hover > 0 && state === 'play') {
+    const k = hover / HOVER_MAX, bw = 80, bx = BIRD_X - bw / 2, by = Math.round(bird.y) + 24;
+    if ((tick / 20 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLY' : 'FLAP TO FLY', clamp(BIRD_X, 70, LW - 70), Math.round(bird.y) - 46, 2, '#fff', '#543847');
+    g.fillStyle = '#543847'; g.fillRect(bx - 2, by - 2, bw + 4, 8);                    // time left before falling
+    g.fillStyle = '#fff4a0'; g.fillRect(bx, by, Math.round(bw * k), 4);
+  }
 
   for (const p of popups) { g.globalAlpha = Math.min(1, p.life / 12); const hw = tw(p.s, p.sc) / 2 + 6; text(p.s, clamp(p.x, hw, LW - hw), p.y, p.sc, p.fill, p.ol); }
   g.globalAlpha = 1;
