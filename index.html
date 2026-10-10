@@ -1840,6 +1840,14 @@ function draw() {
   for (const p of popups) { g.globalAlpha = Math.min(1, p.life / 12); const hw = tw(p.s, p.sc) / 2 + 6; text(p.s, clamp(p.x, hw, LW - hw), p.y, p.sc, p.fill, p.ol); }
   g.globalAlpha = 1;
 
+  // Under the iPhone status bar iOS blurs whatever is drawn, so fade the world into plain sky there:
+  // a solid colour looks the same blurred, and the pipes dissolve upward instead of smearing.
+  if (TOP > 0) {
+    const fg = g.createLinearGradient(0, -TOP, 0, 10);
+    fg.addColorStop(0, '#4ec0ca'); fg.addColorStop(0.55, '#4ec0ca'); fg.addColorStop(1, 'rgba(78,192,202,0)');
+    g.fillStyle = fg; g.fillRect(-10, -TOP - 10, LW + 20, TOP + 20);
+  }
+
   // HUD
   if (wide) drawWideHUD(); else drawCompactHUD();
   if (state === 'play' || state === 'dying') drawBossHUD();
