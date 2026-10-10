@@ -603,11 +603,14 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 7;
+const NOTES_VERSION = 8;
 const PATCH_NOTES = [
   { title: 'NEW LOOK', items: [
     { h: 'FRESH PAINT', col: '#e86a17', t: 'BOLD NEW TITLES AND ORANGE BUTTONS. A TAP GUIDE ON THE TITLE SCREEN SHOWS HOW TO FLAP.' },
     { h: 'DYNAMIC LIGHTING', col: '#c2310c', t: 'FIREBALLS EXPLOSIONS AND TOKENS NOW GLOW AND LIGHT UP THE WORLD AROUND THEM.' },
+  ] },
+  { title: 'LUCKY SLOTS', items: [
+    { h: 'NEW SLOT SCREEN', col: '#f83850', t: 'ALL PRIZES ON ONE TABLE AND A BIG SPIN BUTTON TO TAP.' },
   ] },
   { title: 'PAUSE', items: [
     { h: '3 2 1 GO!', col: '#c2310c', t: 'AFTER A PAUSE A COUNTDOWN GIVES YOU TIME TO GET READY BEFORE THE GAME GOES ON.' },
@@ -1596,36 +1599,42 @@ function drawBeam() {
   }
 }
 
-// Pixel-art slot machine. All coordinates are relative to the cabinet's top-left (mx, my).
+// Slot machine screen. Stacked top to bottom: CONTINUE? header with a countdown badge, the cabinet,
+// a full pay table, your credits, a big close-up SPIN button (the tap target) and GIVE UP.
+// Cabinet coordinates are relative to its top-left (mx, my); everything slides in/out together.
 function drawSlot() {
   const s = slot, MW = 212, LV = 28, ol = '#2a1018';
   const ein = 1 - (1 - clamp(s.t / 22, 0, 1)) ** 3, out = state === 'revive' ? rev.t / 30 : 0;
-  g.fillStyle = `rgba(20,12,24,${0.55 * ein * (1 - out)})`; cover();
+  g.fillStyle = `rgba(20,12,24,${0.6 * ein * (1 - out)})`; cover();
   if (s.t <= 0) return;
-  const mx = Math.round((LW - MW - LV) / 4) * 2, my = Math.round(((wide ? 58 : 66) - (1 - ein) * 380 - out * out * 460) / 2) * 2;
+  const oy = Math.round(((1 - ein) * 420 + out * out * 480) / 2) * 2;   // slide offset for the whole stack
+  const mx = Math.round((LW - MW - LV) / 4) * 2, my = 46 - oy;
   const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(mx + x, my + y, w, h); };
   const rr = (x, y, w, h, c, cut = 2) => { R(x + cut, y, w - cut * 2, h, c); R(x, y + cut, w, h - cut * 2, c); };
-  const party = s.phase === 'jackpot', fast = s.phase === 'spin';
+  const party = s.phase === 'jackpot', fast = s.phase === 'spin', idle = s.phase === 'idle' || s.phase === 'result';
 
-  // countdown
-  if (s.phase === 'idle' || s.phase === 'result') {
-    const n = Math.max(0, Math.ceil(s.count / 60));
-    text('CONTINUE?', LW / 2 - 18, my - 50, 3, '#fff', '#543847', 2);
-    text(n, LW / 2 + 92, my - 54, 4, n <= 3 && (tick >> 3) & 1 ? '#f83850' : '#ffe14d', '#543847', 2);
+  // header: CONTINUE? + countdown badge
+  if (idle) {
+    const n = Math.max(0, Math.ceil(s.count / 60)), hx = LW / 2 - 20, hy = 10 - oy;
+    bigText('CONTINUE?', hx, hy, 3);
+    const bx = hx + tw('CONTINUE?', 3) / 2 + 26, by = hy + 11, hot = n <= 3 && (tick >> 3) & 1;
+    pcircle(bx, by, 18, '#543847'); pcircle(bx, by, 16, '#fff'); pcircle(bx, by, 13, hot ? '#f83850' : '#e86a17');
+    text(n, bx + 1, by - 10, 3, '#fff', '#000', 0);
   }
 
   // lever (behind the cabinet edge)
   const pk = s.pull < 0 ? 0 : s.pull < 8 ? s.pull / 8 : Math.max(0, 1 - (s.pull - 8) / 20);
-  const ky = Math.round((70 + pk * 120) / 2) * 2, lx = MW + 12;
-  rr(MW - 2, 118, 16, 36, ol); R(MW, 120, 12, 32, '#8890a8'); R(MW, 120, 12, 4, '#d8dce8');
-  const top = Math.min(ky, 134), bot = Math.max(ky, 134);
+  const ky = Math.round((64 + pk * 100) / 2) * 2, lx = MW + 12;
+  rr(MW - 2, 104, 16, 36, ol); R(MW, 106, 12, 32, '#8890a8'); R(MW, 106, 12, 4, '#d8dce8');
+  const top = Math.min(ky, 120), bot = Math.max(ky, 120);
   R(lx - 2, top, 8, bot - top, ol); R(lx, top, 4, bot - top, '#d8dce8'); R(lx + 2, top, 2, bot - top, '#8890a8');
   pcircle(mx + lx + 2, my + ky, 12, ol); pcircle(mx + lx + 2, my + ky, 10, '#e0203a'); pcircle(mx + lx, my + ky - 2, 4, '#ff8a9a');
 
   // base + body
-  rr(-6, 232, MW + 12, 22, ol); R(-4, 236, MW + 8, 14, '#8a1428'); R(-4, 234, MW + 8, 2, '#f8c81c');
-  rr(0, 44, MW, 194, ol); R(2, 46, MW - 4, 188, '#c8283c');
-  R(4, 50, 4, 182, '#f05a5a'); R(MW - 10, 50, 6, 182, '#8a1428'); R(2, 46, MW - 4, 4, '#f8c81c');
+  rr(-6, 176, MW + 12, 20, ol); R(-4, 180, MW + 8, 12, '#8a1428'); R(-4, 178, MW + 8, 2, '#f8c81c');
+  rr(0, 44, MW, 138, ol); R(2, 46, MW - 4, 132, '#c8283c');
+  R(4, 50, 4, 126, '#f05a5a'); R(MW - 10, 50, 6, 126, '#8a1428'); R(2, 46, MW - 4, 4, '#f8c81c');
+  rr(MW / 2 - 18, 166, 36, 8, ol); R(MW / 2 - 14, 168, 28, 4, '#200808');   // coin slot
 
   // marquee with chasing bulbs
   rr(0, 0, MW, 48, ol, 4); rr(2, 2, MW - 4, 44, '#f8c81c', 4); R(4, 40, MW - 8, 4, '#b07810'); rr(8, 8, MW - 16, 32, '#3a0c18');
@@ -1660,39 +1669,61 @@ function drawSlot() {
     if (s.suspense && i === 2 && !r.done && s.reels[1].done && (tick >> 2) & 1) { g.fillStyle = 'rgba(248,56,80,0.25)'; g.fillRect(mx + rx, my + RY, 54, RH); }
     g.restore();
   });
-  // payline markers
   for (const [dy, w] of [[-4, 2], [-2, 4], [0, 4], [2, 2]]) { R(12, cy + dy, w + 2, 2, '#f83850'); R(MW - 14 - w, cy + dy, w + 2, 2, '#f83850'); }
   if (s.res && (tick >> 3) & 1) R(18, cy - 1, MW - 36, 2, 'rgba(248,56,80,0.7)');
 
-  // pay table (cycles)
-  rr(12, 168, MW - 24, 22, '#3a0c18');
-  const rows = [['heart', 'REVIVE'], ['seven', '3 TOKENS'], ['bell', '100 COINS'], ['coin', '50 COINS']], row = rows[(tick / 90 | 0) % rows.length];
-  for (let k = 0; k < 3; k++) g.drawImage(SYM[row[0]], mx + 20 + k * 15, my + 173, 12, 12);
-  text('→ ' + row[1], mx + 66, my + 172, 2, row[0] === 'heart' ? '#ff8a9a' : '#ffe14d', '#000', 0, 'l');
+  // pay table: all four prizes at once, the one just won blinks
+  const pw = Math.min(LW - 20, 300), px = Math.round((LW - pw) / 2), py = my + 200;
+  drawPanel(px, py, pw, 50);
+  const rows = [['heart', 'REVIVE', null], ['seven', '+3', tokenSmall], ['bell', '+100', coinSmall], ['coin', '+50', coinSmall]];
+  rows.forEach(([sym, label, icon], i) => {
+    const cx0 = px + 10 + (i % 2) * Math.round(pw / 2), cy0 = py + 6 + (i >> 1) * 22;
+    const hit = s.res && s.out && s.out.every(o => o === sym);
+    if (hit && (tick >> 3) & 1) { g.fillStyle = '#fff8d8'; g.fillRect(cx0 - 4, cy0 - 2, Math.round(pw / 2) - 12, 20); }
+    for (let k = 0; k < 3; k++) g.drawImage(SYM[sym], cx0 + k * 13, cy0, 14, 14);
+    text(label, cx0 + 46, cy0 + 1, 2, sym === 'heart' ? '#c2310c' : '#543847', '#000', 0, 'l');
+    if (icon) g.drawImage(icon, cx0 + 46 + tw(label) + 4, cy0, 14, 14);
+  });
 
-  // credits + spin button
-  rr(12, 196, 146, 28, ol); R(14, 198, 142, 24, '#200808');
-  g.drawImage(tokenSmall, mx + 20, my + 203, 14, 14);
-  text(String(Math.min(tokens, 99)).padStart(2, '0'), mx + 38, my + 203, 2, '#f0a0ff', '#000', 0, 'l');
-  g.drawImage(coinSmall, mx + 72, my + 203, 14, 14);
-  text(String(Math.min(bank, 9999)).padStart(4, '0'), mx + 90, my + 203, 2, '#ff9a30', '#000', 0, 'l');
-  const pressed = s.phase === 'spin', bx = mx + MW - 34, by = my + 210 + (pressed ? 2 : 0);
-  pcircle(bx, my + 212, 14, ol); pcircle(bx, by, 12, pressed ? '#a01028' : '#f83850'); if (!pressed) pcircle(bx - 3, by - 3, 4, '#ffb0bc');
+  // credits
+  const crY = py + 56, crS = String(Math.min(tokens, 99)), coS = String(Math.min(bank, 9999));
+  const crW = 20 + tw(crS) + 20 + 20 + tw(coS), crX = Math.round((LW - crW) / 2);
+  counter(tokenSmall, crS, tokenBump, crX, crY, 'l');
+  counter(coinSmall, coS, coinBump, crX + 20 + tw(crS) + 20, crY, 'l');
 
-  // messages + give up
-  const ty = my + 262;
-  if (s.phase === 'idle') {
-    if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO SPIN', LW / 2, ty, 3, '#fff', '#543847', 2);
-    text(tokens > 0 ? 'ONE SPIN: 1 TOKEN' : 'ONE SPIN: 50 COINS', LW / 2, ty + 32, 2, '#ffe14d', '#543847');
-  } else if (s.phase === 'result') {
-    text(s.msg, LW / 2, ty, 3, s.res === 'win' ? '#ffe14d' : '#fca048', '#543847', 2);
-    text(!canSpin() ? 'NO TOKENS LEFT' : ACT + ' TO SPIN AGAIN', LW / 2, ty + 32, 2, '#fff', '#543847');
-  } else if (party) {
-    const cols = ['#ffe14d', '#fff', '#ff8a9a'];
-    text(s.msg, LW / 2, ty - 4, 5, cols[(tick >> 2) % 3], '#c2310c', 3);
+  // big SPIN button: the close-up of the cabinet's button, and the thing to tap
+  const bw = 156, bh = 48, bx = Math.round((LW - bw) / 2), by = crY + 22, can = canSpin() && idle;
+  const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10);
+  if (!party) {
+    const dy = pressed ? 4 : 0, BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
+    const rrB = (x, y, w, h, c, cut) => { BR(x + cut, y, w - cut * 2, h, c); BR(x, y + cut, w, h - cut * 2, c); BR(x + cut / 2, y + cut / 2, w - cut, h - cut, c); };
+    rrB(0, 0, bw, bh + 6, '#543847', 10);                                   // bezel
+    rrB(2, 2, bw - 4, bh + 2, '#d8dce8', 9); rrB(4, 4 + bh - 4, bw - 8, 6, '#8890a8', 4);
+    rrB(6, 6 + dy, bw - 12, bh - 8 - dy, '#2a1018', 8);                     // button cap
+    const face = can || pressed ? '#f83850' : '#a89098', shade = can || pressed ? '#b01830' : '#806870';
+    rrB(8, 8 + dy, bw - 16, bh - 12 - dy, shade, 7);
+    rrB(8, 8 + dy, bw - 16, bh - 18 - dy, face, 7);
+    BR(18, 12 + dy, bw - 36, 4, can || pressed ? '#ff9aa8' : '#c8b8c0');   // shine
+    const label = !idle && !pressed ? '' : can || pressed ? 'SPIN' : 'NO TOKENS';
+    text(label, bx + bw / 2, by + 13 + dy, label === 'SPIN' ? 3 : 2, '#fff', '#7a0c20', 2);
+    if (can) buttons.push({ x: bx - 6, y: by - 6, w: bw + 12, h: bh + 18, act: () => { if (slot.t > 30) spin(); } });
+    if (can && s.t > 30) {                                                  // pointing hand taps the button
+      const tap = (tick / 20 | 0) % 2 === 0, hx = bx + bw - 14, hy = by + bh - 20 + (tap ? 0 : 5);
+      if (tap) { g.fillStyle = '#fff'; g.fillRect(hx - 6, hy - 6, 2, 6); g.fillRect(hx + 4, hy - 10, 2, 6); g.fillRect(hx + 14, hy - 6, 2, 6); }
+      g.drawImage(HAND, hx - 4, hy, 24, 24);
+    }
   }
-  if ((s.phase === 'idle' || s.phase === 'result') && s.t > 30)
-    button(Math.round((LW - 140) / 2), ty + 56, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp);
+
+  // status line + give up
+  const ty = by + bh + 14;
+  if (s.phase === 'idle') text(tokens > 0 ? 'ONE SPIN COSTS 1 TOKEN' : 'ONE SPIN COSTS 50 COINS', LW / 2, ty, 2, '#fff', '#543847');
+  else if (s.phase === 'result') bigText(s.msg, LW / 2, ty - 6, 3, s.res === 'win' ? '#ffe14d' : '#fca048', s.res === 'win' ? '#f0a020' : '#e06010');
+  else if (party) {
+    const cols = ['#ffe14d', '#fff', '#ff8a9a'];
+    bigText(s.msg, LW / 2, by - 4, 5, cols[(tick >> 2) % 3], '#f0a020');
+  }
+  if (idle && s.t > 30)
+    button(Math.round((LW - 140) / 2), ty + 30, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp, false);
 }
 
 function drawBoss() {
