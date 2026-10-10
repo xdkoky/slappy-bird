@@ -86,7 +86,7 @@ let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot token
 // ============================================================ online leaderboard config
 // Fill in from Supabase: Project URL + publishable (or legacy "anon public") key. Both are meant to be
 // public. Leave empty and the leaderboard stays hidden. Database setup: supabase/leaderboard.sql
-const LB_URL = '';
+const LB_URL = 'https://jjwjghsvqmqixeayocvu.supabase.co';
 const LB_KEY = 'sb_publishable_t2YZwsQqYSFnd-7yxd1Skw_UZChZedm';
 const LB_ON = !!(LB_URL && LB_KEY);
 // This device's player: a random id + secret (proves the row is ours) and a display name.
@@ -664,8 +664,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 8;
+const NOTES_VERSION = 9;
 const PATCH_NOTES = [
+  { title: 'LEADERBOARD', items: [
+    { h: 'BEAT EVERYONE', col: '#e86a17', t: 'YOUR BEST RUNS NOW GO ON A WORLD LEADERBOARD. CHECK THE WEEKLY AND ALL TIME TOP 10.' },
+    { h: 'PICK A NAME', col: '#2050b0', t: 'YOU GET A RANDOM BIRD NAME. CHANGE IT IN THE LEADERBOARD OR IN SETTINGS.' },
+  ] },
   { title: 'NEW LOOK', items: [
     { h: 'FRESH PAINT', col: '#e86a17', t: 'BOLD NEW TITLES AND ORANGE BUTTONS. A TAP GUIDE ON THE TITLE SCREEN SHOWS HOW TO FLAP.' },
     { h: 'DYNAMIC LIGHTING', col: '#c2310c', t: 'FIREBALLS EXPLOSIONS AND TOKENS NOW GLOW AND LIGHT UP THE WORLD AROUND THEM.' },
