@@ -1476,9 +1476,8 @@ function drawCompactHUD() {
   if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
   if (state === 'ready') {
-    bigText('SLAPPY', LW / 2, 64, 6, '#ffd23f', '#f0a020');
-    bigText('BIRD', LW / 2, 118, 6, '#ffd23f', '#f0a020');
-    bigText('GET READY!', LW / 2, 180, 4);
+    bigText('SLAPPY', LW / 2, 80, 6, '#ffd23f', '#f0a020');
+    bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(LW / 2 + 36, 226);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
     notesButton(340);
@@ -1509,8 +1508,7 @@ function drawWideHUD() {
     chip(28, 96, tw(String(tokens)) + 46, 30); counter(tokenSmall, tokens, tokenBump, 40, 104, 'l', true);
   }
   if (state === 'ready') {
-    bigText('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#f0a020');
-    bigText('GET READY!', LW / 2, 154, 4);
+    bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
     notesButton(344);
