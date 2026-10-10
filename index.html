@@ -78,6 +78,8 @@ const NATIVE = !!(window.webkit && window.webkit.messageHandlers && window.webki
 const TOUCH = !NATIVE && (matchMedia('(pointer: coarse)').matches || /[?&]touch\b/.test(location.search));
 if (TOUCH) document.documentElement.classList.add('touch');
 const ACT = TOUCH ? 'TAP' : 'SLAP';
+const STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 // ============================================================ persistence
 const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, window.SAVED || {});
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
@@ -874,6 +876,7 @@ function flap(src) {
   if (nameBoxOpen) return;
   if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
   if (lb.open) { if (src !== 'slap') closeLB(); return; }
+  if (a2hs.open) { if (src !== 'slap') closeA2HS(); return; }
   if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
@@ -1673,8 +1676,8 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // ============================================================ settings menu
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
-const settingsAllowed = () => !raceOn() && !race.panel && (state === 'ready' || (state === 'over' && overT > 50));
-function openSettings() { if (!settingsAllowed()) return; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
+const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && (state === 'ready' || (state === 'over' && overT > 50));
+function openSettings() { if (!settingsAllowed()) return; a2hs.open = false; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
   const label = 'SETTINGS', w = tw(label) + 28;
@@ -1988,6 +1991,93 @@ function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side b
   items.forEach(([l, act], i) => { button(x, y, ws[i], 30, l, act); x += ws[i] + gap; });
 }
 const openNotes = () => { notesPage = 0; sfx('blip', true); };
+
+// ============================================================ add to Home Screen tutorial
+// Shown to people playing in a phone browser (not already the Home Screen app): opens by itself once
+// on the title screen, then stays one tap away. Android browsers that offer an install prompt get a
+// one-tap INSTALL button instead of the steps.
+const A2HS_ON = TOUCH && !NATIVE && !STANDALONE;
+const a2hs = { open: false, page: 0, rect: null, prompt: null };
+let a2hsSeen = false; try { a2hsSeen = localStorage.getItem('slappy-a2hs') === '1'; } catch {}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); a2hs.prompt = e; });
+const A2HS_PAGES = IOS ? [
+  { icon: 'share', t: 'TAP THE SHARE BUTTON IN SAFARI.', s: 'NEWER IPHONES: TAP ... FIRST.', arrow: true },
+  { icon: 'add',   t: 'SCROLL DOWN AND TAP ADD TO HOME SCREEN.', s: 'IT IS IN THE LIST UNDER THE APPS.' },
+  { icon: 'app',   t: 'TAP ADD. THEN OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE.' },
+] : [
+  { icon: 'menu',  t: 'TAP THE MENU BUTTON IN YOUR BROWSER.', s: 'THE THREE DOTS AT THE TOP RIGHT.' },
+  { icon: 'add',   t: 'TAP ADD TO HOME SCREEN OR INSTALL APP.', s: '' },
+  { icon: 'app',   t: 'NOW OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE.' },
+];
+function openA2HS() { if (!A2HS_ON || !settingsAllowed()) return; a2hs.open = true; a2hs.page = 0; notesPage = -1; sfx('blip', true); }
+function closeA2HS() { a2hs.open = false; a2hsSeen = true; try { localStorage.setItem('slappy-a2hs', '1'); } catch {} sfx('blip', false); }
+function a2hsInstall() {
+  const pr = a2hs.prompt; if (!pr) return;
+  a2hs.prompt = null; pr.prompt();
+  (pr.userChoice || Promise.resolve()).then(() => closeA2HS()).catch(() => {});
+}
+function a2hsIcon(kind, cx, cy) {
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(cx + x, cy + y, w, h); };
+  if (kind === 'share') {                           // iOS share: open box with an arrow out of the top
+    R(-22, -8, 6, 34, '#2f7cf6'); R(16, -8, 6, 34, '#2f7cf6'); R(-22, 20, 44, 6, '#2f7cf6');
+    R(-22, -8, 12, 6, '#2f7cf6'); R(10, -8, 12, 6, '#2f7cf6');
+    R(-3, -30, 6, 40, '#2f7cf6');
+    for (let i = 0; i < 4; i++) R(-3 - (i + 1) * 3, -30 + (i + 1) * 3, 6 + (i + 1) * 6 - 6, 3, '#2f7cf6');
+  } else if (kind === 'add') {                      // the "Add to Home Screen" row: plus in a rounded square
+    R(-92, -20, 184, 40, '#fff'); R(-92, 18, 184, 2, '#d0d0d8');
+    R(-84, -12, 24, 24, '#3a3a40'); R(-82, -10, 20, 20, '#fff'); R(-73, -7, 2, 14, '#3a3a40'); R(-79, -1, 14, 2, '#3a3a40');
+    text('ADD TO HOME', cx - 50, cy - 7, 2, '#3a3a40', '#000', 0, 'l');
+  } else if (kind === 'menu') {                     // three vertical dots
+    for (let i = 0; i < 3; i++) { pcircle(cx, cy - 18 + i * 18, 6, '#3a3a40'); }
+  } else if (kind === 'app') {                      // a mini app icon, drawn from the game's own sprites
+    R(-30, -30, 60, 60, '#543847'); R(-28, -28, 56, 56, '#4ec0ca');
+    R(-28, 6, 56, 10, '#9ce659'); R(-28, 16, 56, 12, '#ded895'); R(-28, 6, 56, 2, '#543847');
+    g.save(); g.translate(cx, cy - 6); g.rotate(-0.4); g.drawImage(birdFrames[1], -18, -12, 36, 24); g.restore();
+    text('SLAPPY BIRD', cx, cy + 36, 2, '#543847', '#000', 0);
+  }
+}
+function drawA2HS() {
+  const w = wide ? 400 : LW - 24, x = Math.round((LW - w) / 2), h = 352;
+  const y = clamp(Math.round((Math.min(LH, 560) - h) / 2) - 10, 8, Math.max(8, LH - h - 8));
+  a2hs.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('ADD TO HOME SCREEN', LW / 2, y + 12, 2, '#fff', '#543847', 2);
+  const max = Math.floor((w - 28 + 2) / 12);
+  if (a2hs.prompt) {                                // Android with an install prompt: one tap
+    a2hsIcon('app', LW / 2, y + 96);
+    let ly = y + 160;
+    for (const l of wrapText('PLAY FULL SCREEN LIKE A REAL APP. IT ALSO WORKS OFFLINE.', max)) { text(l, LW / 2, ly, 2, '#543847', '#000', 0); ly += 18; }
+    button(Math.round(LW / 2 - 80), y + h - 92, 160, 34, 'INSTALL', a2hsInstall);
+    button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'NOT NOW', closeA2HS, false);
+    return;
+  }
+  const pg = A2HS_PAGES[a2hs.page], n = A2HS_PAGES.length;
+  text('STEP ' + (a2hs.page + 1) + ' OF ' + n, LW / 2, y + 36, 2, '#8a7438', '#000', 0);
+  a2hsIcon(pg.icon, LW / 2, y + 100);
+  let ly = y + 160;
+  for (const l of wrapText(pg.t, max)) { text(l, LW / 2, ly, 2, '#543847', '#000', 0); ly += 18; }
+  ly += 6;
+  for (const l of wrapText(pg.s, max)) { text(l, LW / 2, ly, 2, '#8a7438', '#000', 0); ly += 18; }
+  for (let i = 0; i < n; i++) { g.fillStyle = i === a2hs.page ? '#e86a17' : '#c9b968'; g.fillRect(LW / 2 - n * 8 + i * 16 + 4, y + h - 62, 8, 8); }
+  const bw = 100;
+  if (a2hs.page > 0) button(x + 14, y + h - 44, bw, 30, 'BACK', () => { a2hs.page--; sfx('blip', false); }, false);
+  else button(x + 14, y + h - 44, bw, 30, 'LATER', closeA2HS, false);
+  if (a2hs.page < n - 1) button(x + w - 14 - bw, y + h - 44, bw, 30, 'NEXT', () => { a2hs.page++; sfx('blip', true); });
+  else button(x + w - 14 - bw, y + h - 44, bw, 30, 'GOT IT', closeA2HS);
+  if (pg.arrow) {                                   // bouncing arrow at Safari's bottom toolbar
+    const b = Math.round(Math.abs(Math.sin(tick * 0.12)) * 10), ax = LW / 2, ay = LH - 30 + b;
+    text('SHARE IS DOWN HERE', ax, ay - 34, 2, '#fff', '#543847');
+    for (let i = 0; i < 8; i++) { g.fillStyle = '#543847'; g.fillRect(ax - 10 + i - 1, ay + i, 22 - i * 2 + 2, 2); }
+    for (let i = 0; i < 7; i++) { g.fillStyle = '#ffd23f'; g.fillRect(ax - 9 + i, ay + i, 18 - i * 2, 2); }
+    g.fillStyle = '#543847'; g.fillRect(ax - 5, ay - 16, 10, 16); g.fillStyle = '#ffd23f'; g.fillRect(ax - 3, ay - 14, 6, 14);
+  }
+}
+function a2hsButton(x, y) {
+  const label = 'ADD TO HOME', w = tw(label) + 24;
+  button(x ?? Math.round((LW - w) / 2), y, w, 28, label, openA2HS);
+}
 function drawLB() {
   const w = wide ? 400 : LW - 20, x = Math.round((LW - w) / 2), h = 472;
   const y = clamp(Math.round((Math.min(LH, 560) - h) / 2), 8, Math.max(8, LH - h - 8));
@@ -2145,6 +2235,7 @@ function drawCompactHUD() {
   if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
   if (state === 'ready') {
+    if (A2HS_ON) { a2hsButton(12, 14); if (!a2hsSeen && notesPage < 0 && !a2hs.open && tick > 40) openA2HS(); }
     bigText('SLAPPY', LW / 2, 80, 6, '#ffd23f', '#f0a020');
     bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(LW / 2 + 36, 226);
@@ -2180,6 +2271,7 @@ function drawWideHUD() {
     chip(28, 96, tw(String(tokens)) + 46, 30); counter(tokenSmall, tokens, tokenBump, 40, 104, 'l', true);
   }
   if (state === 'ready') {
+    if (A2HS_ON) { a2hsButton(null, 24); if (!a2hsSeen && notesPage < 0 && !a2hs.open && tick > 40) openA2HS(); }
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
@@ -2571,6 +2663,7 @@ function draw() {
   if (settingsOpen) drawSettings();
   if (lb.open) drawLB();
   if (race.panel) drawRacePanel();
+  if (a2hs.open) drawA2HS();
   if (paused && resumeT) {
     const n = Math.ceil(resumeT / COUNT_STEP), t = COUNT_STEP - 1 - (resumeT - 1) % COUNT_STEP;   // t: 0..44 within each number
     const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
@@ -2797,7 +2890,6 @@ const LW_MIN = 288, LH_BASE = 512, OVERHANG = 120;   // CSS px of canvas below t
 let visH = innerHeight;
 // iOS Home Screen apps can report a viewport shorter than the physical screen, leaving a black
 // "chin" at the bottom. When that happens, size the page to the real screen and let it overflow there.
-const STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
 // The real screen height: Home Screen apps can report a viewport shorter than the screen.
 function screenHeight() {
   let h = Math.max(innerHeight, document.documentElement.clientHeight, window.visualViewport ? visualViewport.height : 0);
@@ -2829,7 +2921,7 @@ addEventListener('keydown', e => {
   else if (k === 'KeyL' && LB_ON) { if (lb.open) closeLB(); else openLB(); }
   else if (k === 'KeyR' && RACE_ON && !raceOn() && !race.panel) openRace();
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
@@ -2843,7 +2935,7 @@ screen.addEventListener('pointerdown', e => {
   audioInit();
   const r = screen.getBoundingClientRect();
   const atEdge = visH - e.clientY < EDGE_PX;
-  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || notesPage >= 0)) {
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
@@ -2867,6 +2959,7 @@ function handleTap(cx, cy) {
   if (settingsOpen) { const q = settingsRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSettings(); return; }
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   if (race.panel) return;
+  if (a2hs.open) { const q = a2hs.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeA2HS(); return; }
   flap('click');
 }
 if (TOUCH) {
