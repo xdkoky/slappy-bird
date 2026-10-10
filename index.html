@@ -60,7 +60,7 @@
 <div id="safe"></div>
 <div id="statusbar"></div>
 <div id="namebox"><form>
-  <div>YOUR NAME</div>
+  <div class="ttl">YOUR NAME</div>
   <input maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
   <div class="msg"></div>
   <button type="submit" value="ok">OK</button> <button type="button" value="cancel">CANCEL</button>
@@ -680,8 +680,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 11;
+const NOTES_VERSION = 12;
 const PATCH_NOTES = [
+  { title: '1V1 RACE', items: [
+    { h: 'RACE A FRIEND', col: '#3a90d8', t: 'TAP RACE AND CREATE A ROOM. YOUR FRIEND JOINS WITH THE 4 LETTER CODE ON THEIR PHONE.' },
+    { h: 'SAME PIPES LIVE', col: '#1a5a90', t: 'YOU FLY THE SAME COURSE AND SEE EACH OTHER AS A BLUE GHOST. LAST BIRD FLYING WINS!' },
+  ] },
   { title: 'NEW PIPES', items: [
     { h: 'BEAT A BOSS', col: '#1c6a90', t: 'EVERY BOSS YOU BEAT UNLOCKS A NEW KIND OF PIPE. MOVING PIPES COME FIRST.' },
     { h: 'AND THEN...', col: '#5c2c98', t: 'CHOMPERS AND THREE BRAND NEW PIPES. KEEP GOING TO FIND THEM ALL!' },
@@ -763,6 +767,7 @@ function reset() {
 let goals = [], confetti = [], flashes = [];   // flashes: the light burst when a line is passed
 function setupGoals() {
   goals = [];
+  if (raceOn()) return;
   if (best > 0) goals.push({ kind: 'best', score: best });
   const top = LB_ON && lb.data.week && lb.data.week.rows && lb.data.week.rows[0];
   if (top && !top.me && top.score > 0) goals.push({ kind: 'week', score: top.score, name: cleanName(top.name) || 'PLAYER', dev: top.dev });
@@ -774,9 +779,12 @@ function celebrate(gl) {
   const big = gl.kind === 'week';
   sfx('claps', big ? 1.5 : 1); sfx('fanfare');
   setBanner(big ? 'WEEKLY BEST!' : 'NEW BEST!', big ? 'YOU BEAT ' + gl.name : 'KEEP GOING!', 'victory', 130);
+  spawnConfetti(big ? 170 : 110, big);
+}
+function spawnConfetti(n, big) {
   const cols = ['#f83850', '#ffd23f', '#30c8ff', '#7fe05a', '#f0a0ff', '#fff', '#ff8030'];
   flashes.push({ x: BIRD_X, y: bird.y, t: 0, life: big ? 64 : 48, big });
-  for (let i = 0; i < (big ? 170 : 110); i++) {
+  for (let i = 0; i < n; i++) {
     const fromBird = i % 3 === 0;
     confetti.push({
       x: fromBird ? BIRD_X : rand(-10, LW + 10), y: fromBird ? bird.y : rand(-TOP - 120, -TOP - 4),
@@ -842,7 +850,7 @@ function drawGoals() {
 const COUNT_STEP = 45, COUNT_LEN = COUNT_STEP * 3;
 let resumeT = 0;   // frames left in the resume countdown
 function setPaused(v) {
-  v = v && state === 'play';
+  v = v && state === 'play' && !raceOn();   // a race can't be paused
   if (v) { if (!paused || resumeT) { paused = true; resumeT = 0; sfx('blip', false); } }
   else if (paused && !resumeT) { resumeT = COUNT_LEN; sfx('tick'); }
 }
@@ -865,6 +873,7 @@ function flap(src) {
   if (nameBoxOpen) return;
   if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
   if (lb.open) { if (src !== 'slap') closeLB(); return; }
+  if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
@@ -888,7 +897,7 @@ function flap(src) {
 function crash(onGround) {
   sfx('hit'); flash = 1; shake = 7;
   for (const s of shots) s.dead = true;
-  if (score > best) { best = score; newBest = true; save(); }
+  if (score > best && !raceOn()) { best = score; newBest = true; save(); }
   if (onGround) downed();
   else { state = 'dying'; dieSoundAt = tick + 14; }
 }
@@ -931,11 +940,14 @@ const SPECIAL_KINDS = [
 ];
 let shownNew = {};
 function specialKind() {
-  const open = SPECIAL_KINDS.slice(0, Math.min(bossesBeaten, SPECIAL_KINDS.length));
+  const level = raceOn() ? Math.floor(spawned / RACE_UNLOCK_EVERY) : bossesBeaten;
+  const open = SPECIAL_KINDS.slice(0, Math.min(level, SPECIAL_KINDS.length));
   if (!open.length) return null;
   const intro = open.find(n => !shownNew[n.kind]);
-  if (intro && !banner) {                       // (waits until the boss's victory banner is gone)
-    shownNew[intro.kind] = true; setBanner(intro.banner[0], intro.banner[1]); sfx('swoosh');
+  if (intro && (raceOn() || !banner)) {         // (solo: waits until the boss's victory banner is gone)
+    shownNew[intro.kind] = true;
+    const show = () => { setBanner(intro.banner[0], intro.banner[1]); sfx('swoosh'); };
+    if (raceOn()) race.fx.push(show); else show();
     return intro.kind;
   }
   const chance = Math.min(0.75, 0.3 + 0.1 * open.length + 0.04 * Math.max(0, bossesBeaten - open.length));
@@ -957,7 +969,13 @@ function hitPipe(p) {
 
 // Keep pipes queued to just past the right edge; stop at a boss threshold. Pipes that appear inside
 // the visible area (start on a wide screen, window widening) grow in with a staggered animation.
-function spawnPipes() {
+function spawnPipes() {                     // races: the course comes from the shared seed
+  if (!raceOn()) return spawnPipesInner();
+  const mr = Math.random; Math.random = race.rng;
+  try { spawnPipesInner(); } finally { Math.random = mr; }
+  for (const f of race.fx.splice(0)) f();   // banners/sounds deferred so they can't consume the seed
+}
+function spawnPipesInner() {
   let last = pipes[pipes.length - 1], n = 0;
   while (!bossPending && (!last || last.x < LW + 20)) {
     if (spawned >= nextBossAt) { bossPending = true; break; }
@@ -986,7 +1004,7 @@ const circRect = (cx, cy, r, x, y, w, h) => {
 // Coins ride along with a pipe (dx from its left edge). Small ones sit on the safe line through the gap;
 // big ones (worth 3) hug a cap or float far off the path between two pipes: go for it or play it safe.
 function addCoins(p, prev, d) {
-  if (spawned < 2) return;
+  if (spawned < 2 || raceOn()) return;
   const add = o => coins.push(Object.assign({ pipe: p, dx: 24, dy: 0, mode: 'mid', big: false, ph: rand(0, 6), x: p.x + 24, y: 0 }, o));
   // rare token: drifts toward the bird between pipes, bobbing up and down
   if (prev && spawned >= 6 && Math.random() < 0.045 && !coins.some(c => c.token)) {
@@ -1058,6 +1076,7 @@ function rollOutcome() {
   let o; do o = [0, 1, 2].map(() => pick(SYMS)); while (o[0] === o[1] && o[1] === o[2]); return o;
 }
 function downed() {
+  if (raceOn()) { state = 'over'; overT = 0; raceMeDead(); return; }
   save();
   if (canSpin()) {
     state = 'slot';
@@ -1401,9 +1420,11 @@ function updateFX() {
 
 function update() {
   tick++;
+  if (race.phase !== 'off' || race.panel) raceTick();
   if (hitstop > 0) { hitstop--; updateFX(); return; }                       // impact freeze
   if (slowmo > 0) { slowmo--; if (slowmo % 3) { updateFX(); return; } }      // final-blow slow motion
   const sp = speed();
+  if (race.phase === 'run' && state === 'play') race.myDist += sp;
   if (state === 'ready' || state === 'play') { groundX = (groundX + sp) % 24; bgX = (bgX + sp * 0.15) % 288; }
 
   if (state === 'ready') {
@@ -1591,7 +1612,7 @@ function button(x, y, w, h, label, act, on = true, tab = null) {
     if (d < 0.5) text(label, x + w / 2, ly + 2, 2, sh, '#000', 0);
     text(label, x + w / 2, ly, 2, fg, '#000', 0);
   }
-  buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act, key });
+  buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act, key, label });
 }
 function pauseButton(x, y) {
   button(x, y, 30, 32, '', () => setPaused(true));
@@ -1641,7 +1662,7 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // ============================================================ settings menu
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
-const settingsAllowed = () => state === 'ready' || (state === 'over' && overT > 50);
+const settingsAllowed = () => !raceOn() && !race.panel && (state === 'ready' || (state === 'over' && overT > 50));
 function openSettings() { if (!settingsAllowed()) return; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
@@ -1680,6 +1701,222 @@ function drawSettings() {
     ly += 42;
   }
   button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'DONE', closeSettings);
+}
+
+// ============================================================ 1v1 race (two phones, live)
+// Rooms run over Supabase Realtime broadcast (same project as the leaderboard). Both phones build
+// the same course from a shared seed; each sends its bird 10x a second and draws the other one as a
+// blue ghost. Pipes only: no bosses, coins or slots, special pipes unlock every 8 pipes. Last bird
+// flying wins. Races don't touch your best score or the leaderboard.
+const RACE_ON = LB_ON && typeof WebSocket !== 'undefined';
+const RACE_UNLOCK_EVERY = 8;
+const race = { phase: 'off', panel: null, role: null, code: '', ws: null, joined: false, err: '', opp: null,
+  rng: null, myDist: 0, myDone: false, readyMe: false, cdEnd: 0, cdLast: 0, result: null, helloT: 0, fx: [] };
+const raceOn = () => race.phase !== 'off';
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+const GHOST_PAL = { k:'#1a3050', y:'#7ad0ff', Y:'#d8f4ff', o:'#3a90d8', w:'#ffffff', v:'#e8f6ff', r:'#ff5a8a', R:'#e0306a' };
+const ghostFrames = [-1, 0, 1].map(off => { const c = sprite(BIRD, GHOST_PAL); c.getContext('2d').drawImage(sprite(WING, GHOST_PAL), 0, 4 + off); return c; });
+
+// --- connection
+function raceSend(event, payload = {}) {
+  const ws = race.ws; if (!ws || ws.readyState !== 1 || !race.joined) return;
+  ws.send(JSON.stringify({ topic: race.topic, event: 'broadcast', ref: null,
+    payload: { type: 'broadcast', event, payload: Object.assign({ id: player.id }, payload) } }));
+}
+function raceConnect(code, role) {
+  raceDisconnect();
+  Object.assign(race, { code, role, joined: false, err: '', opp: null, topic: 'realtime:slappy-race-' + code, helloT: 0 });
+  let ws;
+  try { ws = new WebSocket(LB_URL.replace(/^http/, 'ws').replace(/\/$/, '') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(LB_KEY) + '&vsn=1.0.0'); }
+  catch { race.err = 'CANNOT CONNECT'; return; }
+  race.ws = ws; let ref = 1;
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ topic: race.topic, event: 'phx_join', ref: String(ref++), join_ref: '1',
+      payload: { config: { broadcast: { self: false, ack: false }, presence: { key: '' }, private: false } } }));
+    race.hb = setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(ref++) })); }, 25000);
+  };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.topic !== race.topic) return;
+    if (m.event === 'phx_reply' && !race.joined) {
+      if (m.payload && m.payload.status === 'ok') { race.joined = true; raceHello(); }
+      else race.err = 'CANNOT JOIN ROOM';
+    } else if (m.event === 'phx_error' || m.event === 'phx_close') race.err = 'CONNECTION LOST';
+    else if (m.event === 'broadcast' && m.payload) raceMsg(m.payload.event, m.payload.payload || {});
+  };
+  ws.onerror = () => { if (!race.err) race.err = 'CANNOT CONNECT'; };
+  ws.onclose = () => { if (race.ws === ws) { race.joined = false; if (!race.err) race.err = 'CONNECTION LOST'; raceCheckEnd(); } };
+}
+function raceDisconnect() {
+  const ws = race.ws; race.ws = null; race.joined = false; clearInterval(race.hb);
+  if (ws) { try { if (ws.readyState === 1) ws.send(JSON.stringify({ topic: race.topic, event: 'broadcast', ref: null, payload: { type: 'broadcast', event: 'leave', payload: { id: player.id } } })); ws.close(); } catch {} }
+}
+function raceHello() { race.helloT = performance.now(); raceSend('hello', { name: player.name, role: race.role }); }
+function raceMsg(ev, d) {
+  const o = race.opp;
+  if (o && d.id && d.id !== o.id) return;                       // a third phone in the room: ignore it
+  if (ev === 'hello' || ev === 'hi') {
+    if (!o) race.opp = { id: d.id, name: cleanName(d.name) || 'PLAYER', d: 0, y: 240, r: 0, s: 0, done: false, left: false, ready: false, recvAt: performance.now(), dy: 240 };
+    else { o.name = cleanName(d.name) || o.name; o.left = false; }
+    if (ev === 'hello') raceSend('hi', { name: player.name, role: race.role });
+    if (!o) sfx('blip', true);
+  } else if (!o) return;
+  else if (ev === 'start' && race.role === 'guest') raceStart(d.seed);
+  else if (ev === 'pos') { Object.assign(o, { d: d.d, y: d.y, r: d.r, s: d.s, recvAt: performance.now() }); }
+  else if (ev === 'dead') { if (!o.done) { o.done = true; o.d = d.d; o.s = d.s; o.y = d.y ?? o.y; raceCheckEnd(); } }
+  else if (ev === 'rematch') { o.ready = true; if (race.role === 'host' && race.readyMe) raceHostStart(); }
+  else if (ev === 'leave') {
+    o.left = true;
+    if (!raceOn()) race.opp = null; else raceCheckEnd();
+  }
+}
+
+// --- flow
+function openRace() { if (!RACE_ON || !settingsAllowed()) return; race.panel = 'lobby'; race.role = null; race.err = ''; notesPage = -1; sfx('blip', true); }
+function raceCreate() {
+  const A = 'ABCDEFGHJKMNPQRSTUVWXYZ'; let c = ''; for (let i = 0; i < 4; i++) c += A[Math.random() * A.length | 0];
+  raceConnect(c, 'host');
+}
+function raceJoin(code) { code = String(code || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); if (code.length === 4) raceConnect(code, 'guest'); }
+function raceLeave() {
+  raceDisconnect();
+  Object.assign(race, { phase: 'off', panel: null, role: null, opp: null, err: '', result: null, myDone: false });
+  reset(); fade = 0; sfx('blip', false);
+}
+function raceHostStart() {
+  if (race.role !== 'host' || !race.opp || race.opp.left) return;
+  const seed = Math.random() * 4294967296 >>> 0;
+  raceSend('start', { seed }); raceStart(seed);
+}
+function raceStart(seed) {
+  reset(); fade = 0;
+  notesPage = -1; settingsOpen = false; lb.open = false; paused = false; resumeT = 0;
+  nextBossAt = Infinity;
+  Object.assign(race, { phase: 'countdown', panel: null, rng: mulberry32(seed), myDist: 0, myDone: false, readyMe: false, result: null,
+    cdEnd: performance.now() + 3000, cdLast: 4, fx: [] });
+  if (race.opp) Object.assign(race.opp, { d: 0, y: 240, dy: 240, r: 0, s: 0, done: false, ready: false, recvAt: performance.now() });
+  sfx('swoosh');
+}
+function raceTick() {                                // called every simulation step
+  if (race.phase === 'countdown') {
+    const left = Math.ceil((race.cdEnd - performance.now()) / 1000);
+    if (left < race.cdLast) { race.cdLast = left; if (left > 0) sfx('tick'); }
+    bird.y = 240 + Math.sin(tick * 0.1) * 4;
+    if (left <= 0) { race.phase = 'run'; state = 'play'; bird.vy = FLAP; sfx('wing'); }
+  } else if (race.phase === 'run' && !race.myDone && tick % 6 === 0)
+    raceSend('pos', { d: Math.round(race.myDist), y: Math.round(bird.y), r: +bird.rot.toFixed(2), s: score });
+  if (race.panel === 'lobby' && race.joined && !race.opp && performance.now() - race.helloT > 1500) raceHello();
+  const o = race.opp;                                // a phone that went quiet mid-race has left
+  if (o && race.phase === 'run' && !o.done && !o.left && performance.now() - o.recvAt > 6000) { o.left = true; raceCheckEnd(); }
+}
+function raceMeDead() {
+  if (race.myDone) return;
+  race.myDone = true;
+  const msg = { d: Math.round(race.myDist), s: score, y: Math.round(bird.y) };
+  raceSend('dead', msg); setTimeout(() => raceSend('dead', msg), 400); setTimeout(() => raceSend('dead', msg), 1200);
+  raceCheckEnd();
+}
+function raceCheckEnd() {
+  if (race.phase === 'off' || race.result || !race.myDone) return;
+  const o = race.opp, gone = !o || o.left || !race.ws;
+  if (!gone && !o.done) return;
+  race.result = gone ? 'left' : race.myDist > o.d + 0.5 ? 'win' : race.myDist < o.d - 0.5 ? 'lose' : 'draw';
+  race.panel = 'done';
+  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); }
+  else if (race.result === 'lose') sfx('lose');
+}
+function raceRematch() {
+  if (race.readyMe) return;
+  race.readyMe = true; raceSend('rematch'); sfx('blip', true);
+  if (race.role === 'host' && race.opp && race.opp.ready) raceHostStart();
+}
+
+// --- drawing
+function raceOppX() {
+  const o = race.opp; if (!o) return null;
+  let d = o.d;
+  if (!o.done && !o.left && race.phase === 'run') d += Math.min(0.4, (performance.now() - o.recvAt) / 1000) * 60 * speed();   // smooth between updates
+  return BIRD_X + (d - race.myDist);
+}
+function drawRaceGhost() {                           // inside the foreground layer
+  const o = race.opp; if (!o || o.left || (race.phase !== 'run' && race.phase !== 'countdown')) return;
+  o.dy += (o.y - o.dy) * 0.35;
+  const x = raceOppX(); if (x < -30 || x > LW + 30) return;
+  g.save(); g.globalAlpha = o.done ? 0.45 : 0.8; g.translate(Math.round(x), Math.round(o.dy)); g.rotate(o.done ? 1.4 : o.r);
+  g.drawImage(ghostFrames[o.done ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4]], -18, -12, 36, 24);
+  g.restore(); g.globalAlpha = 1;
+  text(o.name, clamp(x, tw(o.name) / 2 + 4, LW - tw(o.name) / 2 - 4), o.dy - 34, 2, '#d8f4ff', '#1a3050', 2);
+}
+function drawRaceHUD() {
+  const o = race.opp;
+  text(score, LW / 2, wide ? 26 : 36, wide ? 6 : 4, '#fff', '#000', wide ? 3 : 2);
+  if (o) {                                           // opponent's live score
+    const t = (o.left ? 'LEFT: ' : 'VS ') + o.name + ' ' + o.s, w = tw(t) + 24, cy = wide ? 74 : 72;
+    chip(Math.round(LW / 2 - w / 2), cy, w, 28); text(t, LW / 2, cy + 7, 2, '#7ad0ff', '#000', 0);
+    const x = raceOppX();                            // off-screen: arrow at the edge
+    if (race.phase === 'run' && !o.left && x != null && (x > LW - 6 || x < 6)) {
+      const right = x > LW, ay = clamp(o.dy, 110, GY - 30), ax = right ? LW - 12 : 12, dir = right ? 1 : -1;
+      for (let i = 0; i < 7; i++) {                   // tip at the screen edge, pointing towards them
+        g.fillStyle = '#1a3050'; g.fillRect(ax - dir * i * 2 - 1, ay - i - 1, 3, i * 2 + 2);
+        if (i) { g.fillStyle = '#7ad0ff'; g.fillRect(ax - dir * i * 2, ay - i + 1, 2, i * 2 - 2); }
+      }
+      const lbl = (right ? '+' : '-') + Math.round(Math.abs(x - BIRD_X) / 20);
+      text(lbl, right ? ax - 18 : ax + 18, ay - 7, 2, '#fff', '#1a3050', 2, right ? 'r' : 'l');
+    }
+  }
+  if (race.phase === 'countdown') {
+    const n = Math.max(1, Math.ceil((race.cdEnd - performance.now()) / 1000));
+    bigText(n, LW / 2, 150, wide ? 12 : 10);
+    bigText('RACE!', LW / 2, 250, 4, '#7ad0ff', '#3a90d8');
+  }
+  if (race.myDone && !race.result && o && !o.left) {
+    bigText('WAITING...', LW / 2, 150, wide ? 5 : 4);
+    text(o.name + ' IS STILL FLYING', LW / 2, 200, 2, '#fff', '#543847');
+  }
+}
+function drawRacePanel() {
+  const w = wide ? 400 : LW - 28, x = Math.round((LW - w) / 2), h = 300;
+  const y = clamp(Math.round((Math.min(LH, 560) - h) / 2), 8, Math.max(8, LH - h - 8));
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  const mid = LW / 2, M = (t, yy, c = '#543847') => text(t, mid, y + yy, 2, c, '#000', 0);
+  const btn = (label, yy, act, on = true, bw = 180) => button(Math.round(mid - bw / 2), y + yy, bw, 32, label, act, on);
+  if (race.panel === 'lobby') {
+    text('1V1 RACE', mid, y + 14, 3, '#fff', '#543847', 2);
+    if (!race.role) {
+      M('RACE A FRIEND LIVE', 58, '#8a7438'); M('ON TWO PHONES', 78, '#8a7438');
+      btn('CREATE ROOM', 116, raceCreate); btn('JOIN ROOM', 162, openCodeBox); btn('BACK', 236, raceLeave, false, 120);
+      return;
+    }
+    M(race.role === 'host' ? 'YOUR ROOM CODE' : 'ROOM', 56, '#8a7438');
+    bigText(race.code, mid, y + 78, 5, '#ffd23f', '#f0a020');
+    const o = race.opp;
+    const status = race.err ? race.err : !race.joined ? 'CONNECTING...' : o ? o.name + ' IS HERE!'
+      : race.role === 'host' ? 'WAITING FOR A FRIEND...' : 'LOOKING FOR THE HOST...';
+    M(status, 140, race.err ? '#c2310c' : o ? '#1f7a30' : '#543847');
+    if (race.role === 'host' && !race.err) M(o ? 'READY WHEN YOU ARE' : 'TELL THEM THIS CODE', 162, '#8a7438');
+    if (race.role === 'guest' && o && !race.err) M('THE HOST WILL START', 162, '#8a7438');
+    if (race.role === 'host' && o && !race.err) btn('START', 192, raceHostStart);
+    btn('LEAVE', 246, raceLeave, false, 120);
+  } else if (race.panel === 'done') {
+    const o = race.opp, r = race.result;
+    bigText(r === 'win' || r === 'left' ? 'YOU WIN!' : r === 'lose' ? 'YOU LOSE' : 'DRAW!', mid, y + 14, 4,
+      r === 'lose' ? '#fca048' : '#ffd23f', r === 'lose' ? '#e06010' : '#f0a020');
+    const row = (name, sc, yy, col) => { text(name, x + 24, y + yy, 2, col, '#000', 0, 'l'); text(sc, x + w - 24, y + yy, 2, col, '#000', 0, 'r'); };
+    row(player.name, score, 76, '#c2310c');
+    if (o) row(o.name, o.s, 100, '#1a5a90');
+    M(r === 'left' ? (o ? o.name : 'THEY') + ' LEFT THE RACE' : r === 'draw' ? 'SAME DISTANCE!' : (r === 'win' ? 'YOU' : o.name) + ' FLEW FURTHER', 132, '#8a7438');
+    const canRematch = o && !o.left && race.ws && !race.err;
+    if (canRematch) {
+      if (o.ready && !race.readyMe) M(o.name + ' WANTS A REMATCH!', 158, '#1f7a30');
+      if (race.readyMe) M(race.role === 'host' ? 'WAITING FOR ' + o.name : 'WAITING FOR THE HOST', 158, '#8a7438');
+      btn(race.readyMe ? 'READY' : 'REMATCH', 186, raceRematch, !race.readyMe);
+    }
+    btn('LEAVE', 240, raceLeave, false, 120);
+  }
 }
 
 // ============================================================ online leaderboard
@@ -1811,11 +2048,19 @@ function devName(nm, x, y, maxX) {
 }
 
 // Name entry: a real text field (so the phone keyboard works), styled to match the game.
-let nameBoxOpen = false;
+let nameBoxOpen = false, boxMode = 'name';
+function openCodeBox() {
+  if (nameBoxOpen) return;
+  nameBoxOpen = true; boxMode = 'code'; sfx('blip', true);
+  const box = document.getElementById('namebox'), inp = box.querySelector('input');
+  box.querySelector('.ttl').textContent = 'ROOM CODE'; inp.maxLength = 4; inp.value = ''; nameMsg(''); box.style.display = 'flex';
+  setTimeout(() => inp.focus(), 50);
+}
 function editName() {
   if (nameBoxOpen) return;
-  nameBoxOpen = true; sfx('blip', true);
+  nameBoxOpen = true; boxMode = 'name'; sfx('blip', true);
   const box = document.getElementById('namebox'), inp = box.querySelector('input');
+  box.querySelector('.ttl').textContent = 'YOUR NAME'; inp.maxLength = 12;
   inp.value = player.name; box.style.display = 'flex';
   setTimeout(() => { inp.focus(); inp.select(); }, 50);
 }
@@ -1823,6 +2068,12 @@ function nameMsg(t) { document.querySelector('#namebox .msg').textContent = t; }
 function closeNameBox(ok) {
   const box = document.getElementById('namebox'), inp = box.querySelector('input');
   const done = () => { inp.blur(); box.style.display = 'none'; nameBoxOpen = false; nameMsg(''); };
+  if (boxMode === 'code') {
+    const code = inp.value.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!ok) return done();
+    if (code.length !== 4) { nameMsg('CODES HAVE 4 LETTERS'); return; }
+    done(); raceJoin(code); return;
+  }
   const n = ok ? cleanName(inp.value) : '';
   if (!n || n === player.name) return done();
   if (!LB_ON) { player.name = n; save(); sfx('blip', true); return done(); }
@@ -1878,6 +2129,7 @@ function drawScoreboard(cx, py, w) {
 }
 
 function drawCompactHUD() {
+  if (raceOn()) return drawRaceHUD();
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
   if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
@@ -1886,7 +2138,7 @@ function drawCompactHUD() {
     bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(LW / 2 + 36, 226);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
-    if (LB_ON) lbButton(null, 340); else notesButton(340);
+    if (LB_ON) buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['RACE', openRace]] : [['LEADERBOARD', openLB]]); else notesButton(340);
     if (TOUCH) {
       if (LB_ON) buttonRow(420, [['NOTES', openNotes], ['SETTINGS', openSettings]]); else settingsButton(420);
       text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0);
@@ -1909,6 +2161,7 @@ function drawCompactHUD() {
 }
 
 function drawWideHUD() {
+  if (raceOn()) return drawRaceHUD();
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 26, 6, '#fff', '#000', 3);
   wideTopBar();
   if (state !== 'slot') {
@@ -1919,7 +2172,7 @@ function drawWideHUD() {
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
-    if (LB_ON) buttonRow(344, [['LEADERBOARD', openLB], ['PATCH NOTES', openNotes]], 16); else notesButton(344);
+    if (LB_ON) buttonRow(344, [['LEADERBOARD', openLB], ...(RACE_ON ? [['1V1 RACE', openRace]] : []), ['PATCH NOTES', openNotes]], 16); else notesButton(344);
     wideControls();
   }
   if (state === 'over') {
@@ -2279,6 +2532,7 @@ function draw() {
     g.restore();
   }
   if ((state === 'revive' && rev.t > 30) || (halo > 0 && (halo > 40 || (tick >> 2) & 1))) drawHalo(BIRD_X, Math.round(bird.y) - 22);
+  if (raceOn()) drawRaceGhost();
   endForeground();
   drawConfetti();
 
@@ -2293,6 +2547,7 @@ function draw() {
   if (notesPage >= 0 && state === 'ready') drawNotes();
   if (settingsOpen) drawSettings();
   if (lb.open) drawLB();
+  if (race.panel) drawRacePanel();
   if (paused && resumeT) {
     const n = Math.ceil(resumeT / COUNT_STEP), t = COUNT_STEP - 1 - (resumeT - 1) % COUNT_STEP;   // t: 0..44 within each number
     const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
@@ -2550,8 +2805,9 @@ addEventListener('keydown', e => {
   else if (k === 'KeyC') toggleCrt();
   else if (k === 'KeyS') { if (settingsOpen) closeSettings(); else openSettings(); }
   else if (k === 'KeyL' && LB_ON) { if (lb.open) closeLB(); else openLB(); }
+  else if (k === 'KeyR' && RACE_ON && !raceOn() && !race.panel) openRace();
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
@@ -2564,6 +2820,7 @@ screen.addEventListener('pointerdown', e => {
   if (b) return pressButton(b);
   if (settingsOpen) { const q = settingsRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSettings(); return; }
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
+  if (race.panel) return;
   flap('click');
 });
 if (TOUCH) {
@@ -2571,7 +2828,10 @@ if (TOUCH) {
   for (const t of ['touchstart', 'touchmove', 'gesturestart', 'dblclick'])
     addEventListener(t, e => { if (!(e.target.closest && e.target.closest('#namebox'))) e.preventDefault(); }, { passive: false });
   addEventListener('touchend', () => audioInit());
-  document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); else audioInit(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (race.phase === 'run' && state === 'play') crash(false); setPaused(true); }   // leaving mid-race forfeits
+    else audioInit();
+  });
   // Check for a new version whenever the app comes back to the foreground; once it's installed,
   // reload at the next calm moment (title or game over screen) so a run is never interrupted.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
