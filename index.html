@@ -195,6 +195,16 @@ const SFX = {
     bp.frequency.setValueAtTime(350, t); bp.frequency.exponentialRampToValueAtTime(4500, t + 0.3);
     env(gn.gain, t, 0.12, 0.6, 0.2); n.connect(bp); bp.connect(gn); route(gn, 0.25);
   },
+  claps(k = 1) { // a crowd clapping: lots of short filtered noise bursts, dense at first then thinning out
+    const t = ac.currentTime, n = Math.round(46 * k), dur = 1.9 * k;
+    for (let i = 0; i < n; i++) {
+      const ts = t + Math.pow(Math.random(), 1.5) * dur, src = noise(ts, 0.06);
+      const bp = ac.createBiquadFilter(), gn = ac.createGain();
+      bp.type = 'bandpass'; bp.frequency.value = 900 + Math.random() * 1700; bp.Q.value = 0.8 + Math.random() * 0.8;
+      env(gn.gain, ts, 0.001, (0.25 + Math.random() * 0.3) * (1 - 0.7 * (ts - t) / dur), 0.045);
+      src.connect(bp); bp.connect(gn); route(gn, 0.4);
+    }
+  },
   fanfare() { // new best
     const t = ac.currentTime;
     [1046.5, 1318.5, 1568, 2093].forEach((f, i) => {
@@ -667,8 +677,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 9;
+const NOTES_VERSION = 10;
 const PATCH_NOTES = [
+  { title: 'FINISH LINES', items: [
+    { h: 'BEAT YOUR BEST', col: '#e86a17', t: 'A FINISH LINE SHOWS WHERE YOUR BEST SCORE ENDS. FLY PAST IT FOR CONFETTI AND APPLAUSE.' },
+    { h: 'BEAT THE WEEK', col: '#7a1898', t: 'A GOLD LINE MARKS THE WEEKLY TOP SCORE AND WHO SET IT. CAN YOU PASS THEM?' },
+  ] },
   { title: 'LEADERBOARD', items: [
     { h: 'BEAT EVERYONE', col: '#e86a17', t: 'YOUR BEST RUNS NOW GO ON A WORLD LEADERBOARD. CHECK THE WEEKLY AND ALL TIME TOP 10.' },
     { h: 'PICK A NAME', col: '#2050b0', t: 'YOU GET A RANDOM BIRD NAME. CHANGE IT IN THE LEADERBOARD OR IN SETTINGS.' },
@@ -732,7 +746,82 @@ function reset() {
   overT = 0; newBest = false; popups = []; feathers = []; sparks = []; rings = []; booms = []; shots = []; fade = 1;
   spawned = 0; passedPipes = 0; nextBossAt = FIRST_BOSS; bossPending = false; boss = null; bossesBeaten = 0;
   hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null; shownMove = shownChomp = false;
-  coins = []; slot = null; rev = null; halo = 0;
+  coins = []; slot = null; rev = null; halo = 0; goals = []; confetti = [];
+}
+
+// ------------------------------------------------------------ finish lines
+// Two targets per run: your own best, and this week's #1 on the leaderboard (with their name).
+// Each frame the line is drawn in the gap of whichever upcoming pipe would take you past it;
+// crossing (by any means, boss bonuses included) sets off confetti and applause.
+let goals = [], confetti = [];
+function setupGoals() {
+  goals = [];
+  if (best > 0) goals.push({ kind: 'best', score: best });
+  const top = LB_ON && lb.data.week && lb.data.week.rows && lb.data.week.rows[0];
+  if (top && !top.me && top.score > 0) goals.push({ kind: 'week', score: top.score, name: cleanName(top.name) || 'PLAYER', dev: top.dev });
+}
+function checkGoals() {
+  for (const gl of goals) if (!gl.done && score > gl.score) { gl.done = true; celebrate(gl); }
+}
+function celebrate(gl) {
+  const big = gl.kind === 'week';
+  sfx('claps', big ? 1.5 : 1); sfx('fanfare');
+  setBanner(big ? 'WEEKLY BEST!' : 'NEW BEST!', big ? 'YOU BEAT ' + gl.name : 'KEEP GOING!', 'victory', 130);
+  const cols = ['#f83850', '#ffd23f', '#30c8ff', '#7fe05a', '#f0a0ff', '#fff', '#ff8030'];
+  for (let i = 0; i < (big ? 170 : 110); i++) {
+    const fromBird = i % 3 === 0;
+    confetti.push({
+      x: fromBird ? BIRD_X : rand(-10, LW + 10), y: fromBird ? bird.y : rand(-TOP - 120, -TOP - 4),
+      vx: fromBird ? rand(-3, 3) : rand(-0.6, 0.6), vy: fromBird ? rand(-5, -1) : rand(0.6, 2),
+      w: rand(3, 6), h: rand(4, 8), rot: rand(0, 6.28), vr: rand(0.1, 0.3), ph: rand(0, 6.28),
+      col: cols[i % cols.length], life: rand(150, 230),
+    });
+  }
+}
+function updateConfetti() {
+  for (const c of confetti) {
+    c.vy = Math.min(c.vy + 0.05, 2.4); c.vx *= 0.985;
+    c.x += c.vx + Math.sin(c.ph + c.life * 0.08) * 0.7; c.y += c.vy; c.rot += c.vr; c.life--;
+  }
+  confetti = confetti.filter(c => c.life > 0 && c.y < LH + 10);
+}
+function drawConfetti() {
+  for (const c of confetti) {
+    const w = Math.max(1, Math.abs(Math.cos(c.rot)) * c.w);          // flutter: the piece turns edge-on and back
+    g.globalAlpha = Math.min(1, c.life / 30); g.fillStyle = c.col;
+    g.fillRect(Math.round(c.x - w / 2), Math.round(c.y - c.h / 2), Math.round(w) || 1, Math.round(c.h));
+  }
+  g.globalAlpha = 1;
+}
+function drawGoals() {
+  if (state !== 'play' && state !== 'dying') return;
+  const ahead = pipes.filter(p => !p.passed && p.intro >= 0);
+  const used = new Map();
+  for (const gl of goals) {
+    if (gl.done) continue;
+    const p = ahead[gl.score - score];           // the pipe that would take you to score + 1 past the target
+    if (!p) continue;
+    const stack = used.get(p) || 0; used.set(p, stack + 1);
+    const x = Math.round((p.x + 20) / 2) * 2, y0 = Math.round(p.y0 / 2) * 2, y1 = Math.round(p.y1 / 2) * 2, sq = 6;
+    const A = gl.kind === 'best' ? ['#ffffff', '#1a1020'] : ['#ffd23f', '#7a1898'];
+    const ox = stack * 14;
+    g.fillStyle = 'rgba(26,16,32,0.6)'; g.fillRect(x - 2 + ox, y0, 2 * sq + 4, y1 - y0);
+    for (let y = y0; y < y1; y += sq) for (let c = 0; c < 2; c++) {
+      g.fillStyle = A[(((y - y0) / sq | 0) + c) & 1]; g.fillRect(x + ox + c * sq, y, sq, Math.min(sq, y1 - y));
+    }
+    // flag with the target: yours on the left of the line, the weekly one on the right, so they never collide
+    const fy = gl.kind === 'best' ? y0 + 6 : y1 - 46, fx = x + ox + 2 * sq + 4;
+    if (gl.kind === 'best') {
+      const t = 'BEST ' + gl.score, w = tw(t) + 16, fx = x + ox - 4 - w;
+      g.fillStyle = '#1a1020'; g.fillRect(fx, fy, w, 22); g.fillStyle = '#fff'; g.fillRect(fx + 2, fy + 2, w - 4, 18);
+      text(t, fx + w / 2, fy + 4, 2, '#1a1020', '#000', 0);
+    } else {
+      const t2 = gl.name + ' ' + gl.score, w = Math.max(tw('WEEKLY TOP'), tw(t2)) + 16;
+      g.fillStyle = '#ffd23f'; g.fillRect(fx, fy, w, 40); g.fillStyle = '#7a1898'; g.fillRect(fx + 2, fy + 2, w - 4, 36);
+      text('WEEKLY TOP', fx + w / 2, fy + 4, 2, '#f0a0ff', '#000', 0);
+      text(t2, fx + w / 2, fy + 21, 2, gl.dev ? ['#fff', '#fff4a0', '#ffd23f'][(tick >> 3) % 3] : '#ffd23f', '#000', 0);
+    }
+  }
 }
 
 // Resuming runs a 3-2-1 countdown first; the game stays frozen (paused) until it reaches zero.
@@ -767,7 +856,7 @@ function flap(src) {
   if (state === 'dying' || state === 'revive') return;
   if (state === 'slot') { if (slot.t > 30) spin(); return; }
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
-  if (state === 'ready') state = 'play';
+  if (state === 'ready') { state = 'play'; setupGoals(); }
   bird.vy = FLAP;
   // a slap/flap while a fireball is close knocks it back
   let target = null, bd = PARRY_R;
@@ -1240,6 +1329,8 @@ function updateShots() {
 }
 
 function updateFX() {
+  updateConfetti();
+  checkGoals();
   for (const p of popups) { p.y += p.vy; p.life--; }
   popups = popups.filter(p => p.life > 0);
   for (const f of feathers) { f.x += f.vx; f.y += f.vy; f.vy += 0.05; f.life--; }
@@ -1527,7 +1618,7 @@ function lbFlush() {
     .then(stored => {
       if (player.pending === sc) player.pending = 0;
       if (typeof stored === 'string' && stored) player.name = stored;   // the server may add a number / refuse a taken name
-      player.named = true; save(); lbRetry = 4000; lb.data.week = lb.data.all = null; if (lb.open) lbLoad();
+      player.named = true; save(); lbRetry = 4000; lbLoad();   // keep showing the old board until the new one arrives
     })
     .catch(() => { setTimeout(lbFlush, lbRetry); lbRetry = Math.min(lbRetry * 2, 120000); })   // offline / too fast: try again later
     .finally(() => { lbSending = false; });
@@ -2065,6 +2156,7 @@ function draw() {
     drawPipe(x, -10 - up, Math.round(p.y0 / 2) * 2 - up, true, pal, teeth);
     drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + dn, false, pal, teeth);
   }
+  drawGoals();
   g.restore();
 
   for (const c of coins) if (c.token) drawToken(c); else if (!c.pipe || c.pipe.intro >= INTRO) drawCoin(c);
@@ -2091,6 +2183,7 @@ function draw() {
   }
   if ((state === 'revive' && rev.t > 30) || (halo > 0 && (halo > 40 || (tick >> 2) & 1))) drawHalo(BIRD_X, Math.round(bird.y) - 22);
   endForeground();
+  drawConfetti();
 
   for (const p of popups) { g.globalAlpha = Math.min(1, p.life / 12); const hw = tw(p.s, p.sc) / 2 + 6; text(p.s, clamp(p.x, hw, LW - hw), p.y, p.sc, p.fill, p.ol); }
   g.globalAlpha = 1;
@@ -2424,7 +2517,7 @@ function loop(now) {
 if (LB_ON) {
   // one-time: put the best score from before the leaderboard existed on the board
   if (!player.bestSynced) { player.bestSynced = true; if (best > 0) player.pending = Math.max(player.pending, best); save(); }
-  lbFlush(); addEventListener('online', lbFlush);
+  lbFlush(); lbLoad(); addEventListener('online', () => { lbFlush(); lbLoad(); });
 }
 reset(); fade = 0;
 requestAnimationFrame(loop);
