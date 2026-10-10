@@ -2104,6 +2104,13 @@ function drawLB() {
       const nm = cleanName(r.name) || 'PLAYER';
       if (r.dev) devRowBack(x + 8, ly - 3, w - 16, 20);
       else if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 3, w - 16, 20); }
+      if (r.me) {                                  // you: pulsing orange outline + an arrow at the panel edge
+        const on = Math.sin(performance.now() / 180) > -0.3, c = on ? '#e86a17' : '#f8a050', rx = x + 6, ry = ly - 5, rw = w - 12, rh = 24;
+        if (!r.dev || on) { g.fillStyle = c; g.fillRect(rx, ry, rw, 2); g.fillRect(rx, ry + rh - 2, rw, 2); g.fillRect(rx, ry, 2, rh); g.fillRect(rx + rw - 2, ry, 2, rh); }
+        const bob = Math.round(Math.sin(performance.now() / 160) * 2), ax = x + 2 + bob, ay = ly + 7;
+        for (let i = 0; i < 9; i++) { g.fillStyle = '#543847'; g.fillRect(ax - 10 + i, ay - 9 + i, 2, 19 - i * 2); }
+        for (let i = 0; i < 7; i++) { g.fillStyle = '#ffb040'; g.fillRect(ax - 9 + i, ay - 6 + i, 1, 13 - i * 2); }
+      }
       const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
       text(r.rank, x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
