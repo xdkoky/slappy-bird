@@ -576,8 +576,11 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 4;
+const NOTES_VERSION = 5;
 const PATCH_NOTES = [
+  { title: 'PAUSE', items: [
+    { h: '3 2 1 GO!', col: '#c2310c', t: 'AFTER A PAUSE A COUNTDOWN GIVES YOU TIME TO GET READY BEFORE THE GAME GOES ON.' },
+  ] },
   { title: 'SETTINGS', items: [
     { h: 'ONE MENU FOR EVERYTHING', col: '#2050b0', t: 'SOUND AND CRT NOW LIVE IN THE NEW SETTINGS MENU ON THE TITLE SCREEN.' },
     { h: 'SMOOTHER SCREEN', col: '#1f7a30', t: 'THE CRT EFFECT NO LONGER FLICKERS. ON IPHONE THE GAME NOW FILLS THE WHOLE SCREEN.' },
@@ -630,9 +633,17 @@ function reset() {
   coins = []; slot = null; rev = null; halo = 0;
 }
 
+// Resuming runs a 3-2-1 countdown first; the game stays frozen (paused) until it reaches zero.
+const COUNT_STEP = 45, COUNT_LEN = COUNT_STEP * 3;
+let resumeT = 0;   // frames left in the resume countdown
 function setPaused(v) {
   v = v && state === 'play';
-  if (paused !== v) { paused = v; sfx('blip', !v); }
+  if (v) { if (!paused || resumeT) { paused = true; resumeT = 0; sfx('blip', false); } }
+  else if (paused && !resumeT) { resumeT = COUNT_LEN; sfx('tick'); }
+}
+function countdownStep() {   // one 60Hz frame of the resume countdown
+  if (--resumeT <= 0) { resumeT = 0; paused = false; sfx('blip', true); }
+  else if (resumeT % COUNT_STEP === 0) sfx('tick');
 }
 
 function popup(s, x, y, o = {}) { popups.push(Object.assign({ s, x, y, life: 36, sc: 2, fill: '#ffe14d', ol: '#c2310c', vy: -0.8 }, o)); }
@@ -647,7 +658,7 @@ function setBanner(text, sub, kind = 'info', life = 110) { banner = { text, sub,
 function flap(src) {
   audioInit();
   if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
-  if (paused) paused = false;
+  if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
   if (state === 'slot') { if (slot.t > 30) spin(); return; }
@@ -1727,7 +1738,15 @@ function draw() {
   drawBanner();
   if (notesPage >= 0 && state === 'ready') drawNotes();
   if (settingsOpen) drawSettings();
-  if (paused) {
+  if (paused && resumeT) {
+    const n = Math.ceil(resumeT / COUNT_STEP), t = COUNT_STEP - 1 - (resumeT - 1) % COUNT_STEP;   // t: 0..44 within each number
+    const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
+    g.fillStyle = `rgba(20,12,24,${0.15 + 0.1 * n})`; cover();
+    g.globalAlpha = t > COUNT_STEP - 10 ? (COUNT_STEP - t) / 10 : 1;
+    text(n, LW / 2, 200 - sc * 3.5, sc, '#ffd23f', '#543847', sc > big ? 6 : 4);
+    g.globalAlpha = 1;
+    text('GET READY!', LW / 2, 270, 3, '#7fe05a', '#1f5410', 2);
+  } else if (paused) {
     g.fillStyle = 'rgba(20,12,24,0.45)'; cover();
     text('PAUSED', LW / 2, 190, wide ? 6 : 5, '#fff', '#543847', 4);
     if ((performance.now() / 400 | 0) % 2 === 0) text(TOUCH ? 'TAP TO RESUME' : 'SLAP OR SPACE TO RESUME', LW / 2, 260, 2, '#fff', '#543847');
@@ -1869,7 +1888,7 @@ addEventListener('keydown', e => {
   else if (k === 'KeyS') { if (settingsOpen) closeSettings(); else openSettings(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
   else if (k === 'Escape') { if (settingsOpen) closeSettings(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
-  else if (k === 'KeyP') { setPaused(!paused); }
+  else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
@@ -1908,7 +1927,7 @@ let updateReady = false;
 function loop(now) {
   if (updateReady && (state === 'ready' || (state === 'over' && overT > 50))) { updateReady = false; location.reload(); }
   acc = Math.min(acc + now - prev, 250); prev = now;
-  while (acc >= STEP) { if (!paused) update(); acc -= STEP; }
+  while (acc >= STEP) { if (resumeT) countdownStep(); else if (!paused) update(); acc -= STEP; }
   level *= 0.9;
   draw(); present();
   led.className = sensorLive() ? 'on' : '';
