@@ -29,16 +29,19 @@
   body.fs #bezel { padding:0; border-radius:0; background:none; box-shadow:none; }
   body.fs #screen { border-radius:0; box-shadow:none; }
   body.fs #label, body.fs #led { display:none; }
-  /* iPhone / touch: edge-to-edge, below the status bar, no browser gestures */
+  /* iPhone / touch: edge-to-edge (the sky runs up under the status bar), no browser gestures */
   html.touch, html.touch body { background:#000; touch-action:none; overscroll-behavior:none;
     -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
-  html.touch #monitor { top:env(safe-area-inset-top); left:env(safe-area-inset-left); right:env(safe-area-inset-right); }
+  html.touch #monitor { position:fixed; inset:0; height:100vh; height:100dvh; }
+  #safe { position:fixed; top:0; left:0; width:0; height:0; visibility:hidden; pointer-events:none;
+    padding-top:env(safe-area-inset-top); }
   html.touch #bezel { padding:0; border-radius:0; background:none; box-shadow:none; }
   html.touch #screen { border-radius:0; box-shadow:none; }
   html.touch #label, html.touch #led { display:none; }
 </style>
 </head>
 <body>
+<div id="safe"></div>
 <div id="monitor">
   <div id="bezel">
     <canvas id="screen"></canvas>
@@ -354,18 +357,21 @@ function textImg(str, sc, fill, ol, olw) {
 // so wide windows / full screen see further ahead ("draw distance").
 let LH = 512; const GY = 400;
 let LW = 288, BIRD_X = 80, wide = false, fullscreen = false;
+let TOP = 0;   // extra sky above the play area (under the iPhone status bar), in logical px
 const game = document.createElement('canvas');
 const g = game.getContext('2d');
-function resizeGame(w, h = 512) {
-  w = Math.max(288, Math.min(1200, Math.round(w / 2) * 2)); h = Math.round(h / 2) * 2;
-  if (w === LW && h === LH && game.width === w * 2) return;
-  LW = w; LH = h; wide = LW >= 520;
-  game.width = LW * 2; game.height = LH * 2;
-  g.setTransform(2, 0, 0, 2, 0, 0); g.imageSmoothingEnabled = false;
+function resizeGame(w, h = 512, top = 0) {
+  w = Math.max(288, Math.min(1200, Math.round(w / 2) * 2)); h = Math.round(h / 2) * 2; top = Math.round(top / 2) * 2;
+  if (w === LW && h === LH && top === TOP && game.width === w * 2) return;
+  LW = w; LH = h; TOP = top; wide = LW >= 520;
+  game.width = LW * 2; game.height = (LH + TOP) * 2;
+  g.setTransform(2, 0, 0, 2, 0, TOP * 2); g.imageSmoothingEnabled = false;
   // keep the bird about a quarter in; shift the world with it so a running game stays consistent
   const bx = wide ? Math.round(Math.min(LW * 0.26, 220) / 2) * 2 : 80, d = bx - BIRD_X;
   if (d) { BIRD_X = bx; for (const o of [...pipes, ...feathers, ...popups]) o.x += d; }
 }
+
+const cover = () => g.fillRect(0, -TOP, LW, LH + TOP);   // full-screen overlay
 
 function text(str, x, y, sc = 2, fill = '#fff', ol = '#543847', olw = 2, align = 'c') {
   const c = textImg(String(str).toUpperCase(), sc, fill, ol, olw);
@@ -570,8 +576,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 3;
+const NOTES_VERSION = 4;
 const PATCH_NOTES = [
+  { title: 'SETTINGS', items: [
+    { h: 'ONE MENU FOR EVERYTHING', col: '#2050b0', t: 'SOUND AND CRT NOW LIVE IN THE NEW SETTINGS MENU ON THE TITLE SCREEN.' },
+    { h: 'SMOOTHER SCREEN', col: '#1f7a30', t: 'THE CRT EFFECT NO LONGER FLICKERS. ON IPHONE THE GAME NOW FILLS THE WHOLE SCREEN.' },
+  ] },
   { title: 'TOKENS', items: [
     { h: 'SLOTS NOW TAKE TOKENS', col: '#c040e0', t: 'ONE TOKEN BUYS ONE SPIN. NO TOKEN? 50 COINS WORK TOO.' },
     { h: 'CATCH THEM IF YOU CAN', col: '#7a1898', t: 'RARE TOKENS FLY AT YOU BOBBING UP AND DOWN. LOOK FOR THE SPARKLY TRAIL!' },
@@ -636,6 +646,7 @@ function setBanner(text, sub, kind = 'info', life = 110) { banner = { text, sub,
 
 function flap(src) {
   audioInit();
+  if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
   if (paused) paused = false;
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
@@ -1239,7 +1250,10 @@ function keycap(x, y, label) {
 const keycapW = label => Math.max(18, tw(label) + 8);
 function hintsWidth(h) { return h.reduce((a, [k, l]) => a + keycapW(k) + 6 + tw(l) + 18, -18); }
 function drawHints(x, y, h) {
-  for (const [k, l] of h) { x += keycap(x, y, k) + 6; text(l, x, y + 4, 2, '#543847', '#000', 0, 'l'); x += tw(l) + 18; }
+  for (const [k, l, act] of h) {
+    const x0 = x; x += keycap(x, y, k) + 6; text(l, x, y + 4, 2, '#543847', '#000', 0, 'l'); x += tw(l) + 18;
+    if (act) buttons.push({ x: x0 - 6, y: y - 6, w: x - x0 - 6, h: 34, act });
+  }
 }
 
 // Wide layout: chips in the top corners, a control strip on the ground.
@@ -1254,11 +1268,11 @@ function wideTopBar() {
   text(s, sx + 30, 30, 2, '#fff', '#000', 0, 'l');
 }
 function wideControls() {
-  if (TOUCH) return touchButtons(436);
+  if (TOUCH) return settingsButton(436);
   const y = 438;
   const left = sensorLive() ? 'SENSITIVITY ' + sensLevel : 'NO SENSOR: SPACE OR CLICK TO FLAP';
   const leftW = sensorLive() ? 18 + 4 + 18 + 10 + tw(left) + 14 + 120 : tw(left);
-  const right = [['M', muted ? 'MUTED' : 'SOUND'], ['C', 'CRT'], ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
+  const right = [['S', 'SETTINGS', openSettings], ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
   const rightW = hintsWidth(right), margin = 40, stacked = leftW + rightW + margin * 2 + 40 > LW;
   let lx = stacked ? (LW - leftW) / 2 : margin;
   if (sensorLive()) {
@@ -1278,38 +1292,80 @@ function button(x, y, w, h, label, act, on = true) {
   if (label) text(label, x + w / 2, y + (h - 17) / 2, 2, on ? '#543847' : '#8a7438', '#000', 0);
   buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act });
 }
-function touchButtons(y) {
-  const w = 124, gap = 12, x = Math.round((LW - w * 2 - gap) / 2);
-  button(x, y, w, 30, muted ? 'SOUND OFF' : 'SOUND ON', toggleMute, !muted);
-  button(x + w + gap, y, w, 30, crtOn ? 'CRT ON' : 'CRT OFF', toggleCrt, crtOn);
-}
 function pauseButton(x, y) {
   button(x, y, 30, 32, '', () => setPaused(true));
   g.fillStyle = '#543847'; g.fillRect(x + 9, y + 8, 4, 13); g.fillRect(x + 17, y + 8, 4, 13);
 }
 function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.8; save(); if (!muted) sfx('blip', true); }
 function toggleCrt() { crtOn = !crtOn; save(); sfx('blip', crtOn); }
+function setSens(d) { sensLevel = clamp(sensLevel + d, 1, 10); save(); sfx('blip', d > 0); }
+function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen'); }
+
+// ============================================================ settings menu
+// Every option lives here. Opened from the title / game over screen (button or S key).
+let settingsOpen = false, settingsRect = null;
+const settingsAllowed = () => state === 'ready' || (state === 'over' && overT > 50);
+function openSettings() { if (!settingsAllowed()) return; settingsOpen = true; notesPage = -1; sfx('blip', true); }
+function closeSettings() { settingsOpen = false; sfx('blip', false); }
+function settingsButton(y) {
+  const label = 'SETTINGS', w = tw(label) + 28;
+  button(Math.round((LW - w) / 2), y, w, 30, label, openSettings);
+}
+function drawSettings() {
+  const rows = [['SOUND', !muted, toggleMute], ['CRT EFFECT', crtOn, toggleCrt]];
+  if (!TOUCH) rows.push(['SENSITIVITY']);
+  if (NATIVE) rows.push(['FULLSCREEN', fullscreen, toggleFullscreen]);
+  const w = wide ? 400 : LW - 28, x = Math.round((LW - w) / 2), meter = !TOUCH;
+  const h = 66 + rows.length * 42 + (meter ? 30 : 0) + 56;
+  const y = clamp(Math.round(214 - h / 2), 8, Math.max(8, LH - h - 8));
+  settingsRect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(20,12,24,0.5)'; cover();
+  drawPanel(x, y, w, h);
+  text('SETTINGS', LW / 2, y + 16, 3, '#fff', '#543847', 2);
+  let ly = y + 62;
+  for (const [label, on, act] of rows) {
+    text(label, x + 14, ly + 8, 2, '#543847', '#ded895', 0, 'l');
+    const bx = x + w - 14;
+    if (label === 'SENSITIVITY') {
+      button(bx - 92, ly, 30, 30, '<', () => setSens(-1), sensLevel > 1);
+      text(sensLevel, bx - 46, ly + 8, 2, '#543847', '#ded895', 0);
+      button(bx - 30, ly, 30, 30, '>', () => setSens(1), sensLevel < 10);
+      ly += 42;
+      if (sensorLive()) meterBar(x + 16, ly + 4, w - 32);
+      else text('NO SENSOR', LW / 2, ly, 2, '#8a7438', '#ded895', 0);
+      ly += 30;
+      continue;
+    }
+    button(bx - 72, ly, 72, 30, on ? 'ON' : 'OFF', act, on);
+    ly += 42;
+  }
+  button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'DONE', closeSettings);
+}
 
 function notesButton(y) {
   const label = 'PATCH NOTES', w = tw(label) + 28;
   button(Math.round((LW - w) / 2), y, w, 30, label, () => { notesPage = 0; sfx('blip', true); });
 }
 function drawNotes() {
-  const pg = PATCH_NOTES[notesPage], w = wide ? 460 : LW - 28, x = Math.round((LW - w) / 2), max = Math.floor((w - 28) / 12);
+  const pg = PATCH_NOTES[notesPage], w = wide ? 460 : LW - 28, x = Math.round((LW - w) / 2);
+  const max = Math.floor((w - 28 + 2) / 12);            // characters that fit between the 14px margins
+  const lines = it => ({ h: wrapText(it.h, it.col === '#e0309a' ? max - 3 : max), t: wrapText(it.t, max) });
   // every page gets the height of the tallest one, so the panel doesn't jump around
-  const h = Math.max(...PATCH_NOTES.map(q => q.items.reduce((a, it) => a + 32 + 18 * wrapText(it.t, max).length, 104)));
-  const y = Math.max(16, Math.round(214 - h / 2));
+  const h = Math.max(...PATCH_NOTES.map(q => q.items.reduce((a, it) => { const l = lines(it); return a + 14 + 20 * l.h.length + 18 * l.t.length; }, 110)));
+  const y = clamp(Math.round(214 - h / 2), 8, Math.max(8, LH - h - 8));
   buttons = [];                                         // the whole screen turns the page
-  g.fillStyle = 'rgba(20,12,24,0.5)'; g.fillRect(0, 0, LW, LH);
+  g.fillStyle = 'rgba(20,12,24,0.5)'; cover();
   drawPanel(x, y, w, h);
   text('WHAT IS NEW', LW / 2, y + 12, 2, '#e86a17', '#ded895', 0);
-  text(pg.title, LW / 2, y + 34, 3, '#fff', '#543847', 2);
+  text(pg.title, LW / 2, y + 34, Math.min(3, Math.floor((w - 16) / (pg.title.length * 6))), '#fff', '#543847', 2);
   let ly = y + 74;
   for (const it of pg.items) {
-    if (it.col === '#e0309a') { pcircle(x + 24, ly + 6, 8, '#4a1038'); pcircle(x + 24, ly + 6, 6, '#ff5cc8'); pcircle(x + 22, ly + 4, 2, '#fff'); }
-    text(it.h, it.col === '#e0309a' ? x + 40 : x + 14, ly, 2, it.col || '#e86a17', '#ded895', 0, 'l'); ly += 20;
-    for (const l of wrapText(it.t, max)) { text(l, x + 14, ly, 2, '#543847', '#ded895', 0, 'l'); ly += 18; }
-    ly += 12;
+    const l = lines(it), dot = it.col === '#e0309a';
+    if (dot) { pcircle(x + 24, ly + 6, 8, '#4a1038'); pcircle(x + 24, ly + 6, 6, '#ff5cc8'); pcircle(x + 22, ly + 4, 2, '#fff'); }
+    for (const s of l.h) { text(s, dot ? x + 40 : x + 14, ly, 2, it.col || '#e86a17', '#ded895', 0, 'l'); ly += 20; }
+    for (const s of l.t) { text(s, x + 14, ly, 2, '#543847', '#ded895', 0, 'l'); ly += 18; }
+    ly += 14;
   }
   text((notesPage + 1) + '/' + PATCH_NOTES.length, x + w - 14, y + h - 24, 2, '#8a7438', '#ded895', 0, 'r');
   if ((tick / 24 | 0) % 2 === 0)
@@ -1338,11 +1394,12 @@ function drawCompactHUD() {
     text('GET READY!', LW / 2, 178, 4, '#7fe05a', '#1f5410', 2);
     if ((tick / 24 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLAP' : 'SLAP YOUR MAC TO FLAP', LW / 2, 300, TOUCH ? 3 : 2, '#fff', '#543847');
     notesButton(340);
-    if (TOUCH) { touchButtons(420); text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0); }
+    if (TOUCH) { settingsButton(420); text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0); }
     else {
+      settingsButton(376);
       drawMeter(414);
       text('BEST ' + best, LW / 2, 450, 2, '#e86a17', '#ded895', 0);
-      text('M:SOUND  C:CRT  F:FULL', LW / 2, 468, 2, '#8a7438', '#ded895', 0);
+      text('S:SETTINGS  F:FULL', LW / 2, 468, 2, '#8a7438', '#ded895', 0);
     }
   }
   if (state === 'over') {
@@ -1351,7 +1408,7 @@ function drawCompactHUD() {
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
       if (!canSpin()) text('50 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
-      if (TOUCH) touchButtons(420); else drawMeter(414);
+      if (TOUCH) settingsButton(420); else drawMeter(414);
     }
   }
 }
@@ -1442,7 +1499,7 @@ function drawHalo(cx, cy) {
 function drawBeam() {
   const t = rev.t, k = t < 20 ? t / 20 : t > 96 ? Math.max(0, 1 - (t - 96) / 16) : 1;
   if (!k) return;
-  g.fillStyle = `rgba(255,220,120,${0.14 * k})`; g.fillRect(0, 0, LW, LH);
+  g.fillStyle = `rgba(255,220,120,${0.14 * k})`; cover();
   const w = Math.round((34 + Math.sin(tick * 0.2) * 4) * k / 2) * 2, h = Math.round(bird.y) + 24;
   g.fillStyle = `rgba(255,244,170,${0.3 * k})`; g.fillRect(BIRD_X - w, 0, w * 2, h);
   g.fillStyle = `rgba(255,255,255,${0.4 * k})`; g.fillRect(BIRD_X - w / 2, 0, w, h);
@@ -1457,7 +1514,7 @@ function drawBeam() {
 function drawSlot() {
   const s = slot, MW = 212, LV = 28, ol = '#2a1018';
   const ein = 1 - (1 - clamp(s.t / 22, 0, 1)) ** 3, out = state === 'revive' ? rev.t / 30 : 0;
-  g.fillStyle = `rgba(20,12,24,${0.55 * ein * (1 - out)})`; g.fillRect(0, 0, LW, LH);
+  g.fillStyle = `rgba(20,12,24,${0.55 * ein * (1 - out)})`; cover();
   if (s.t <= 0) return;
   const mx = Math.round((LW - MW - LV) / 4) * 2, my = Math.round(((wide ? 58 : 66) - (1 - ein) * 380 - out * out * 460) / 2) * 2;
   const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(mx + x, my + y, w, h); };
@@ -1618,7 +1675,7 @@ function draw() {
   // background (tiled, slow parallax)
   const bx = -Math.round(bgX / 2) * 2;
   for (let x = bx; x < LW; x += 288) g.drawImage(bg, x, 0, 288, 400);
-  g.fillStyle = '#4ec0ca'; g.fillRect(-10, -10, LW + 20, 10);
+  g.fillStyle = '#4ec0ca'; g.fillRect(-10, -TOP - 10, LW + 20, TOP + 10);
 
   for (const p of pipes) {
     const x = Math.round(p.x / 2) * 2;
@@ -1669,26 +1726,27 @@ function draw() {
   if (state === 'slot' || (state === 'revive' && rev.t < 30)) drawSlot();
   drawBanner();
   if (notesPage >= 0 && state === 'ready') drawNotes();
+  if (settingsOpen) drawSettings();
   if (paused) {
-    g.fillStyle = 'rgba(20,12,24,0.45)'; g.fillRect(0, 0, LW, LH);
+    g.fillStyle = 'rgba(20,12,24,0.45)'; cover();
     text('PAUSED', LW / 2, 190, wide ? 6 : 5, '#fff', '#543847', 4);
     if ((performance.now() / 400 | 0) % 2 === 0) text(TOUCH ? 'TAP TO RESUME' : 'SLAP OR SPACE TO RESUME', LW / 2, 260, 2, '#fff', '#543847');
   }
   g.restore();
 
-  if (flash) { g.fillStyle = `rgba(255,255,255,${flash})`; g.fillRect(0, 0, LW, LH); }
-  if (hurtFlash) { g.fillStyle = `rgba(255,40,60,${hurtFlash * 0.5})`; g.fillRect(0, 0, LW, LH); }
-  if (fade) { g.fillStyle = `rgba(0,0,0,${fade})`; g.fillRect(0, 0, LW, LH); }
+  if (flash) { g.fillStyle = `rgba(255,255,255,${flash})`; cover(); }
+  if (hurtFlash) { g.fillStyle = `rgba(255,40,60,${hurtFlash * 0.5})`; cover(); }
+  if (fade) { g.fillStyle = `rgba(0,0,0,${fade})`; cover(); }
 }
 
 // ============================================================ CRT post-processing (WebGL)
 const screen = document.getElementById('screen');
 const gl = screen.getContext('webgl', { antialias: false, alpha: false });
-let uTime, uCrt, uSize, uCurv;
+let uCrt, uSize, uCurv;
 if (gl) {
   const vs = `attribute vec2 p; varying vec2 uv; void main(){ uv = vec2(p.x*.5+.5, .5-p.y*.5); gl_Position = vec4(p,0.,1.); }`;
   const fs = `precision mediump float;
-    uniform sampler2D t; uniform float time; uniform float crt; uniform vec2 lsize; uniform float curv; varying vec2 uv;
+    uniform sampler2D t; uniform float crt; uniform vec2 lsize; uniform float curv; varying vec2 uv;
     vec2 curve(vec2 p){ p = p*2.-1.; vec2 o = abs(p.yx)/vec2(5.5,4.2); p += p*o*o*curv; return p*.5+.5; }
     vec3 s(vec2 q){ return texture2D(t,q).rgb; }
     void main(){
@@ -1704,12 +1762,12 @@ if (gl) {
       c *= mix(.68, 1.1, sl);
       float m = mod(gl_FragCoord.x, 3.);
       c *= m<1. ? vec3(1.,.82,.82) : m<2. ? vec3(.82,1.,.82) : vec3(.82,.82,1.);
-      float v = 16.*q.x*q.y*(1.-q.x)*(1.-q.y); c *= pow(v, .25);
-      c *= .975 + .025*sin(time*95.) + .01*sin(q.y*8.-time*6.);
-      float n = fract(sin(dot(gl_FragCoord.xy + time*61., vec2(12.9898,78.233)))*43758.5453);
-      c += (n-.5)*.04;
-      vec2 e = min(q, 1.-q)*lsize;
-      c *= smoothstep(0., 3., e.x) * smoothstep(0., 3., e.y);
+      float v = 16.*q.x*q.y*(1.-q.x)*(1.-q.y);
+      if (curv > 0.) {
+        c *= pow(v, .25);
+        vec2 e = min(q, 1.-q)*lsize;
+        c *= smoothstep(0., 3., e.x) * smoothstep(0., 3., e.y);
+      } else c *= pow(v, .08);   // flat glass (phones): light vignette, picture reaches the edges
       gl_FragColor = vec4(c*1.18, 1.);
     }`;
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
@@ -1725,17 +1783,17 @@ if (gl) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  uTime = gl.getUniformLocation(prog, 'time'); uCrt = gl.getUniformLocation(prog, 'crt');
+  uCrt = gl.getUniformLocation(prog, 'crt');
   uSize = gl.getUniformLocation(prog, 'lsize'); uCurv = gl.getUniformLocation(prog, 'curv');
 }
 const ctx2d = gl ? null : screen.getContext('2d');
 
-function present(now) {
+function present() {
   if (gl) {
     gl.viewport(0, 0, screen.width, screen.height);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, game);
-    gl.uniform1f(uTime, now / 1000); gl.uniform1f(uCrt, crtOn ? 1 : 0);
-    gl.uniform2f(uSize, LW, LH); gl.uniform1f(uCurv, wide ? 0.55 : 1);
+    gl.uniform1f(uCrt, crtOn ? 1 : 0);
+    gl.uniform2f(uSize, LW, LH + TOP); gl.uniform1f(uCurv, TOUCH ? 0 : wide ? 0.55 : 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   } else {
     ctx2d.imageSmoothingEnabled = false; ctx2d.drawImage(game, 0, 0, screen.width, screen.height);
@@ -1743,15 +1801,20 @@ function present(now) {
 }
 
 function layout() {
-  if (TOUCH) {                             // fill the screen below the status bar
+  if (TOUCH) {                             // fill the whole screen; the HUD stays below the status bar
     const r = document.getElementById('monitor').getBoundingClientRect();
-    let w = Math.floor(r.width), h = Math.floor(r.height), lw = LH_BASE * w / h, lh = LH_BASE;
-    if (lw < LW_MIN) { lw = LW_MIN; lh = Math.min(720, LW_MIN * h / w); h = Math.floor(w * lh / lw); }
-    if (lw > 1200) { lw = 1200; w = Math.floor(h * lw / lh); }
+    const inset = parseFloat(getComputedStyle(document.getElementById('safe')).paddingTop) || 0;
+    let w = Math.ceil(r.width), h = Math.ceil(r.height);
+    const ph = Math.max(1, h - inset);     // play area height in CSS px
+    let lw = LH_BASE * w / ph, lh = LH_BASE;
+    if (lw < LW_MIN) { lw = LW_MIN; lh = Math.min(720, LW_MIN * ph / w); }
+    if (lw > 1200) { lw = 1200; w = Math.floor(lw * ph / lh); }   // ultra-wide: pillarbox
+    const top = inset * lw / w;
+    lh = Math.max(lh, h * lw / w - top);   // taller than the cap: the ground just runs further down
     screen.style.width = w + 'px'; screen.style.height = h + 'px';
     const k = Math.min(devicePixelRatio, Math.sqrt(3.2e6 / (w * h)));
     screen.width = Math.round(w * k); screen.height = Math.round(h * k);
-    resizeGame(lw, lh);
+    resizeGame(lw, lh, top);
     return;
   }
   let w = innerWidth, h = innerHeight;
@@ -1769,28 +1832,35 @@ function layout() {
 const LW_MIN = 288, LH_BASE = 512;
 window.setFullscreen = on => { fullscreen = on; document.body.classList.toggle('fs', on); layout(); };
 addEventListener('resize', layout); layout();
+if (TOUCH) {   // iOS reports the final size late after launch / rotation
+  addEventListener('orientationchange', () => setTimeout(layout, 300));
+  if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+  addEventListener('pageshow', layout); setTimeout(layout, 300);
+}
 
 // ============================================================ input
 addEventListener('keydown', e => {
   audioInit();
   const k = e.code;
   if (['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(k)) { e.preventDefault(); if (!e.repeat) flap('key'); }
-  else if (k === 'ArrowLeft' || k === 'Minus' || k === 'BracketLeft') { e.preventDefault(); sensLevel = Math.max(1, sensLevel - 1); sfx('blip', false); save(); }
-  else if (k === 'ArrowRight' || k === 'Equal' || k === 'BracketRight') { e.preventDefault(); sensLevel = Math.min(10, sensLevel + 1); sfx('blip', true); save(); }
-  else if (k === 'KeyM') { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.8; save(); }
-  else if (k === 'KeyC') { crtOn = !crtOn; save(); }
+  else if (k === 'ArrowLeft' || k === 'Minus' || k === 'BracketLeft') { e.preventDefault(); setSens(-1); }
+  else if (k === 'ArrowRight' || k === 'Equal' || k === 'BracketRight') { e.preventDefault(); setSens(1); }
+  else if (k === 'KeyM') toggleMute();
+  else if (k === 'KeyC') toggleCrt();
+  else if (k === 'KeyS') { if (settingsOpen) closeSettings(); else openSettings(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (settingsOpen) closeSettings(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
-  else if (k === 'KeyN' && state === 'ready') { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
+  else if (k === 'KeyN' && state === 'ready' && !settingsOpen) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
 screen.addEventListener('pointerdown', e => {
   audioInit();
-  const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * LH;
+  const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * (LH + TOP) - TOP;
   if (TOUCH && paused) return setPaused(false);
   const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
   if (b) return b.act();
+  if (settingsOpen) { const q = settingsRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSettings(); return; }
   flap('click');
 });
 if (TOUCH) {
@@ -1821,7 +1891,7 @@ function loop(now) {
   acc = Math.min(acc + now - prev, 250); prev = now;
   while (acc >= STEP) { if (!paused) update(); acc -= STEP; }
   level *= 0.9;
-  draw(); present(now);
+  draw(); present();
   led.className = sensorLive() ? 'on' : '';
   requestAnimationFrame(loop);
 }

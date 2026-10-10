@@ -1,5 +1,5 @@
 // Offline cache for the Home Screen web app. Bump VERSION whenever the game changes.
-const VERSION = 'slappy-20261009174932';
+const VERSION = 'slappy-20261010120000';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
