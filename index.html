@@ -45,11 +45,24 @@
   html.touch #bezel { padding:0; border-radius:0; background:none; box-shadow:none; }
   html.touch #screen { border-radius:0; box-shadow:none; }
   html.touch #label, html.touch #led { display:none; }
+  #namebox { display:none; position:fixed; inset:0; z-index:20; align-items:center; justify-content:center;
+    background:rgba(20,12,24,.6); touch-action:auto; }
+  #namebox form { background:#ded895; border:4px solid #543847; box-shadow:0 0 0 2px #fff8d8 inset, 4px 6px 0 rgba(28,16,40,.35);
+    padding:18px 18px 16px; width:min(300px, calc(100vw - 48px)); font:700 16px/1.2 Menlo, monospace; color:#543847; text-align:center; }
+  #namebox input { display:block; width:100%; box-sizing:border-box; margin:12px 0 14px; padding:10px; font:700 20px Menlo, monospace;
+    text-transform:uppercase; letter-spacing:2px; color:#543847; background:#fff8d8; border:3px solid #543847; border-radius:0; outline:none; }
+  #namebox button { font:700 15px Menlo, monospace; padding:9px 0; width:46%; border:3px solid #543847; color:#fff; background:#e86a17; }
+  #namebox button[value=cancel] { background:#b4a88c; }
 </style>
 </head>
 <body>
 <div id="safe"></div>
 <div id="statusbar"></div>
+<div id="namebox"><form>
+  <div>YOUR NAME</div>
+  <input maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
+  <button type="submit" value="ok">OK</button> <button type="button" value="cancel">CANCEL</button>
+</form></div>
 <div id="monitor">
   <div id="bezel">
     <canvas id="screen"></canvas>
@@ -70,8 +83,35 @@ const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, windo
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
 let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot tokens carry over between runs
+// ============================================================ online leaderboard config
+// Fill in from Supabase: Project Settings -> API (Project URL + "anon public" key). Both are meant to be
+// public. Leave empty and the leaderboard stays hidden. Database setup: supabase/leaderboard.sql
+const LB_URL = '';
+const LB_KEY = '';
+const LB_ON = !!(LB_URL && LB_KEY);
+// This device's player: a random id + secret (proves the row is ours) and a display name.
+// Web pages can't see the device or Game Center name, so the default is a random bird name.
+const randHex = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+const newUUID = () => crypto.randomUUID ? crypto.randomUUID() : randHex(16).replace(/^(.{8})(.{4})(.{4})(.{4})/, '$1-$2-$3-$4-');
+function randomName() {
+  const A = ['SWIFT', 'LUCKY', 'BRAVE', 'ZIPPY', 'FUZZY', 'MIGHTY', 'SNEAKY', 'TURBO', 'JUMPY', 'NIFTY', 'SPEEDY', 'COSMIC'];
+  const B = ['DUCK', 'CROW', 'OWL', 'HAWK', 'WREN', 'JAY', 'DOVE', 'KIWI', 'ROBIN', 'FINCH', 'PUFFIN', 'GULL'];
+  let n; do n = A[Math.random() * A.length | 0] + ' ' + B[Math.random() * B.length | 0]; while (n.length > 12); return n;
+}
+const cleanName = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
+let idStore = {}; try { idStore = JSON.parse(localStorage.getItem('slappy-id') || '{}'); } catch {}
+const player = {
+  id: SAVED.pid || idStore.pid || newUUID(),
+  secret: SAVED.psec || idStore.psec || randHex(16),
+  name: cleanName(SAVED.pname || idStore.pname || window.PLAYER_NAME) || randomName(),
+  pending: Math.max(SAVED.pend | 0, idStore.pend | 0),   // best score not yet uploaded (offline)
+  named: (SAVED.pnamed ?? idStore.pnamed) !== false,     // false = renamed, server doesn't know yet
+};
+
 function save() {
-  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens };
+  const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens,
+    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named };
+  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed })); } catch {}
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -712,7 +752,9 @@ function setBanner(text, sub, kind = 'info', life = 110) { banner = { text, sub,
 
 function flap(src) {
   audioInit();
+  if (nameBoxOpen) return;
   if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
+  if (lb.open) { if (src !== 'slap') closeLB(); return; }
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
@@ -872,7 +914,7 @@ function downed() {
     state = 'slot';
     slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0,
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
-  } else { state = 'over'; overT = 0; }
+  } else { state = 'over'; overT = 0; lbSubmit(score); }
 }
 function spin() {
   const s = slot;
@@ -929,7 +971,7 @@ function resolveSpin() {
   }
   if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
-function giveUp() { state = 'over'; overT = 0; slot = null; }
+function giveUp() { state = 'over'; overT = 0; slot = null; lbSubmit(score); }
 
 // ------------------------------------------------------------ revive
 // A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
@@ -1336,11 +1378,11 @@ function wideTopBar() {
   text(s, sx + 30, 30, 2, '#fff', '#000', 0, 'l');
 }
 function wideControls() {
-  if (TOUCH) return settingsButton(436);
+  if (TOUCH) return LB_ON && state === 'over' ? buttonRow(436, [['LEADERBOARD', openLB], ['SETTINGS', openSettings]], 16) : settingsButton(436);
   const y = 438;
   const left = sensorLive() ? 'SENSITIVITY ' + sensLevel : 'NO SENSOR: SPACE OR CLICK TO FLAP';
   const leftW = sensorLive() ? 18 + 4 + 18 + 10 + tw(left) + 14 + 120 : tw(left);
-  const right = [['S', 'SETTINGS', openSettings], ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
+  const right = [['S', 'SETTINGS', openSettings], ...(LB_ON ? [['L', 'SCORES', openLB]] : []), ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
   const rightW = hintsWidth(right), margin = 40, stacked = leftW + rightW + margin * 2 + 40 > LW;
   let lx = stacked ? (LW - leftW) / 2 : margin;
   if (sensorLive()) {
@@ -1416,7 +1458,7 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
 const settingsAllowed = () => state === 'ready' || (state === 'over' && overT > 50);
-function openSettings() { if (!settingsAllowed()) return; settingsOpen = true; notesPage = -1; sfx('blip', true); }
+function openSettings() { if (!settingsAllowed()) return; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
   const label = 'SETTINGS', w = tw(label) + 28;
@@ -1426,6 +1468,7 @@ function drawSettings() {
   const rows = [['SOUND', !muted, toggleMute], ['CRT EFFECT', crtOn, toggleCrt]];
   if (!TOUCH) rows.push(['SENSITIVITY']);
   if (NATIVE) rows.push(['FULLSCREEN', fullscreen, toggleFullscreen]);
+  if (LB_ON) rows.push(['NAME']);
   const w = wide ? 400 : LW - 28, x = Math.round((LW - w) / 2), meter = !TOUCH;
   const h = 66 + rows.length * 42 + (meter ? 30 : 0) + 56;
   const y = clamp(Math.round(214 - h / 2), 8, Math.max(8, LH - h - 8));
@@ -1448,10 +1491,119 @@ function drawSettings() {
       ly += 30;
       continue;
     }
+    if (label === 'NAME') { const nw = Math.min(tw(player.name) + 24, w - 90); button(bx - nw, ly, nw, 30, player.name, editName); ly += 42; continue; }
     button(bx - 72, ly, 72, 30, on ? 'ON' : 'OFF', act, on);
     ly += 42;
   }
   button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'DONE', closeSettings);
+}
+
+// ============================================================ online leaderboard
+// Weekly (resets Mondays 00:00 UTC) and all-time top 10, shared by everyone, via Supabase.
+const lb = { open: false, tab: 'week', rect: null, data: { week: null, all: null }, busy: { week: false, all: false } };
+function lbCall(fn, body) {
+  return fetch(LB_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
+    method: 'POST', body: JSON.stringify(body),
+    headers: { apikey: LB_KEY, Authorization: 'Bearer ' + LB_KEY, 'Content-Type': 'application/json' },
+  }).then(r => r.ok ? r.text().then(t => t ? JSON.parse(t) : null) : Promise.reject(r.status));
+}
+let lbSending = false, lbRetry = 4000;
+// Upload the best unsent score (and/or a name change). Retries next time if offline.
+function lbFlush() {
+  if (!LB_ON || lbSending || (!player.pending && player.named)) return;
+  lbSending = true;
+  const sc = player.pending;
+  lbCall('submit_score', { p_id: player.id, p_secret: player.secret, p_name: player.name, p_score: sc })
+    .then(() => { if (player.pending === sc) player.pending = 0; player.named = true; save(); lbRetry = 4000; lb.data.week = lb.data.all = null; if (lb.open) lbLoad(); })
+    .catch(() => { setTimeout(lbFlush, lbRetry); lbRetry = Math.min(lbRetry * 2, 120000); })   // offline / too fast: try again later
+    .finally(() => { lbSending = false; });
+}
+function lbSubmit(sc) {   // called when a run ends
+  if (!LB_ON || sc <= 0) return;
+  player.pending = Math.max(player.pending, sc); save(); lbFlush();
+}
+function lbLoad() {
+  for (const kind of ['week', 'all']) {
+    if (lb.busy[kind]) continue;
+    lb.busy[kind] = true;
+    lbCall('leaderboard', { p_kind: kind, p_id: player.id })
+      .then(rows => { lb.data[kind] = { rows: rows || [], t: performance.now() }; })
+      .catch(() => { if (!lb.data[kind]) lb.data[kind] = { err: true }; })
+      .finally(() => { lb.busy[kind] = false; });
+  }
+}
+function openLB() {
+  if (!LB_ON || !settingsAllowed()) return;
+  lb.open = true; notesPage = -1; settingsOpen = false; sfx('blip', true);
+  lbFlush();
+  if (!lb.data.week || !lb.data.all || lb.data.week.err || performance.now() - (lb.data.week.t || 0) > 20000) lbLoad();
+}
+function closeLB() { lb.open = false; sfx('blip', false); }
+function lbButton(x, y, w) {
+  const label = 'LEADERBOARD'; w = w || tw(label) + 28;
+  button(x ?? Math.round((LW - w) / 2), y, w, 30, label, openLB);
+}
+function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side by side
+  const ws = items.map(([l]) => tw(l) + 28), tot = ws.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
+  let x = Math.round((LW - tot) / 2);
+  items.forEach(([l, act], i) => { button(x, y, ws[i], 30, l, act); x += ws[i] + gap; });
+}
+const openNotes = () => { notesPage = 0; sfx('blip', true); };
+function drawLB() {
+  const w = wide ? 400 : LW - 20, x = Math.round((LW - w) / 2), h = 472;
+  const y = clamp(Math.round((Math.min(LH, 560) - h) / 2), 8, Math.max(8, LH - h - 8));
+  lb.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('LEADERBOARD', LW / 2, y + 12, 3, '#fff', '#543847', 2);
+  const tw2 = Math.round((w - 36) / 2);
+  button(x + 14, y + 46, tw2, 28, 'WEEKLY', () => { lb.tab = 'week'; sfx('blip', true); }, lb.tab === 'week');
+  button(x + w - 14 - tw2, y + 46, tw2, 28, 'ALL TIME', () => { lb.tab = 'all'; sfx('blip', true); }, lb.tab === 'all');
+  text(lb.tab === 'week' ? 'RESETS EVERY MONDAY' : 'BEST SCORES EVER', LW / 2, y + 82, 2, '#8a7438', '#000', 0);
+  const d = lb.data[lb.tab], ly0 = y + 108;
+  if (!d) text('LOADING...', LW / 2, ly0 + 100, 2, '#8a7438', '#000', 0);
+  else if (d.err) { text('NO CONNECTION', LW / 2, ly0 + 90, 2, '#c2310c', '#000', 0); text('TRY AGAIN LATER', LW / 2, ly0 + 112, 2, '#8a7438', '#000', 0); }
+  else if (!d.rows.length) text(lb.tab === 'week' ? 'NO SCORES THIS WEEK' : 'NO SCORES YET', LW / 2, ly0 + 100, 2, '#8a7438', '#000', 0);
+  else {
+    let ly = ly0;
+    d.rows.forEach((r, i) => {
+      if (i === 10) {                        // our own row, outside the top 10
+        for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly + 6, 4, 4); }
+        ly += 18;
+      }
+      if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 3, w - 16, 20); }
+      const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
+      if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
+      text(r.rank, x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
+      text(cleanName(r.name) || 'PLAYER', x + 40, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
+      text(r.score, x + w - 14, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
+      ly += 22;
+    });
+  }
+  // your name + edit, and close
+  g.fillStyle = '#c9b968'; g.fillRect(x + 10, y + h - 92, w - 20, 2);
+  text(player.name, x + 14, y + h - 76, 2, '#c2310c', '#000', 0, 'l');
+  button(x + w - 14 - 64, y + h - 82, 64, 28, 'EDIT', editName);
+  button(Math.round(LW / 2 - 60), y + h - 42, 120, 30, 'DONE', closeLB);
+}
+
+// Name entry: a real text field (so the phone keyboard works), styled to match the game.
+let nameBoxOpen = false;
+function editName() {
+  if (nameBoxOpen) return;
+  nameBoxOpen = true; sfx('blip', true);
+  const box = document.getElementById('namebox'), inp = box.querySelector('input');
+  inp.value = player.name; box.style.display = 'flex';
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+function closeNameBox(ok) {
+  const box = document.getElementById('namebox'), inp = box.querySelector('input');
+  if (ok) {
+    const n = cleanName(inp.value);
+    if (n && n !== player.name) { player.name = n; player.named = false; save(); lbFlush(); sfx('blip', true); }
+  }
+  inp.blur(); box.style.display = 'none'; nameBoxOpen = false;
 }
 
 function notesButton(y) {
@@ -1504,10 +1656,12 @@ function drawCompactHUD() {
     bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(LW / 2 + 36, 226);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
-    notesButton(340);
-    if (TOUCH) { settingsButton(420); text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0); }
-    else {
-      settingsButton(376);
+    if (LB_ON) lbButton(null, 340); else notesButton(340);
+    if (TOUCH) {
+      if (LB_ON) buttonRow(420, [['NOTES', openNotes], ['SETTINGS', openSettings]]); else settingsButton(420);
+      text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0);
+    } else {
+      if (LB_ON) buttonRow(376, [['NOTES', openNotes], ['SETTINGS', openSettings]]); else settingsButton(376);
       drawMeter(414);
       text('BEST ' + best, LW / 2, 450, 2, '#e86a17', '#ded895', 0);
       text('S:SETTINGS  F:FULL', LW / 2, 468, 2, '#8a7438', '#ded895', 0);
@@ -1519,7 +1673,7 @@ function drawCompactHUD() {
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
       if (!canSpin()) text('50 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
-      if (TOUCH) settingsButton(420); else drawMeter(414);
+      if (TOUCH) { if (LB_ON) { lbButton(null, 420); settingsButton(458); } else settingsButton(420); } else drawMeter(414);
     }
   }
 }
@@ -1535,7 +1689,7 @@ function drawWideHUD() {
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
-    notesButton(344);
+    if (LB_ON) buttonRow(344, [['LEADERBOARD', openLB], ['PATCH NOTES', openNotes]], 16); else notesButton(344);
     wideControls();
   }
   if (state === 'over') {
@@ -1895,6 +2049,7 @@ function draw() {
   drawBanner();
   if (notesPage >= 0 && state === 'ready') drawNotes();
   if (settingsOpen) drawSettings();
+  if (lb.open) drawLB();
   if (paused && resumeT) {
     const n = Math.ceil(resumeT / COUNT_STEP), t = COUNT_STEP - 1 - (resumeT - 1) % COUNT_STEP;   // t: 0..44 within each number
     const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
@@ -2131,6 +2286,7 @@ if (TOUCH) {   // iOS reports the final size late after launch / rotation
 
 // ============================================================ input
 addEventListener('keydown', e => {
+  if (nameBoxOpen) { if (e.code === 'Escape') closeNameBox(false); return; }   // typing a name
   audioInit();
   const k = e.code;
   if (['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(k)) { e.preventDefault(); if (!e.repeat) flap('key'); }
@@ -2139,11 +2295,12 @@ addEventListener('keydown', e => {
   else if (k === 'KeyM') toggleMute();
   else if (k === 'KeyC') toggleCrt();
   else if (k === 'KeyS') { if (settingsOpen) closeSettings(); else openSettings(); }
+  else if (k === 'KeyL' && LB_ON) { if (lb.open) closeLB(); else openLB(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (settingsOpen) closeSettings(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
-  else if (k === 'KeyN' && state === 'ready' && !settingsOpen) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
+  else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
 screen.addEventListener('pointerdown', e => {
   audioInit();
@@ -2152,11 +2309,13 @@ screen.addEventListener('pointerdown', e => {
   const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
   if (b) return b.act();
   if (settingsOpen) { const q = settingsRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSettings(); return; }
+  if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   flap('click');
 });
 if (TOUCH) {
   // no scrolling, rubber-banding, double-tap zoom or pinch; unlock audio on the first touch
-  for (const t of ['touchstart', 'touchmove', 'gesturestart', 'dblclick']) addEventListener(t, e => e.preventDefault(), { passive: false });
+  for (const t of ['touchstart', 'touchmove', 'gesturestart', 'dblclick'])
+    addEventListener(t, e => { if (!(e.target.closest && e.target.closest('#namebox'))) e.preventDefault(); }, { passive: false });
   addEventListener('touchend', () => audioInit());
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); else audioInit(); });
   // Check for a new version whenever the app comes back to the foreground; once it's installed,
@@ -2203,6 +2362,13 @@ function loop(now) {
   led.className = sensorLive() ? 'on' : '';
   requestAnimationFrame(loop);
 }
+{
+  const box = document.getElementById('namebox'), form = box.querySelector('form');
+  form.addEventListener('submit', e => { e.preventDefault(); closeNameBox(true); });
+  form.querySelector('button[value=cancel]').addEventListener('click', () => closeNameBox(false));
+  box.addEventListener('pointerdown', e => { if (e.target === box) closeNameBox(false); });
+}
+if (LB_ON) { lbFlush(); addEventListener('online', lbFlush); }
 reset(); fade = 0;
 requestAnimationFrame(loop);
 </script>
