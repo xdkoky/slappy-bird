@@ -683,8 +683,8 @@ function pcircle(cx, cy, r, col) {
 const NOTES_VERSION = 11;
 const PATCH_NOTES = [
   { title: 'NEW PIPES', items: [
-    { h: 'BEAT A BOSS', col: '#1c6a90', t: 'EVERY BOSS YOU BEAT UNLOCKS A NEW KIND OF PIPE. ANGLED PIPES COME FIRST.' },
-    { h: 'AND THEN...', col: '#5c2c98', t: 'KEEP GOING TO FIND OUT WHAT COMES NEXT!' },
+    { h: 'BEAT A BOSS', col: '#1c6a90', t: 'EVERY BOSS YOU BEAT UNLOCKS A NEW KIND OF PIPE. MOVING PIPES COME FIRST.' },
+    { h: 'AND THEN...', col: '#5c2c98', t: 'CHOMPERS AND THREE BRAND NEW PIPES. KEEP GOING TO FIND THEM ALL!' },
   ] },
   { title: 'FINISH LINES', items: [
     { h: 'BEAT YOUR BEST', col: '#e86a17', t: 'A FINISH LINE SHOWS WHERE YOUR BEST SCORE ENDS. FLY PAST IT FOR CONFETTI AND APPLAUSE.' },
@@ -740,7 +740,7 @@ let state = 'ready', tick = 0, score = 0, pipes = [], groundX = 0, bgX = 0;
 let overT = 0, flash = 0, hurtFlash = 0, fade = 0, shake = 0, newBest = false, dieSoundAt = -1;
 let popups = [], feathers = [], sparks = [], rings = [], booms = [], shots = [], paused = false;
 let spawned = 0, passedPipes = 0, nextBossAt = FIRST_BOSS, bossPending = false, boss = null, bossesBeaten = 0;
-let hearts = 3, combo = 0, parries = 0, hitstop = 0, slowmo = 0, banner = null, shownMove = false, shownChomp = false;
+let hearts = 3, combo = 0, parries = 0, hitstop = 0, slowmo = 0, banner = null;
 const COINS_PER_SPIN = 50;   // a spin takes a token, or 50 coins if you have none
 const canSpin = () => tokens > 0 || bank >= COINS_PER_SPIN;
 let coins = [], coinBump = 0, tokenBump = 0, slot = null, rev = null, halo = 0;   // world coins, slot machine, revive sequence
@@ -752,7 +752,7 @@ function reset() {
   state = 'ready'; score = 0; pipes = []; bird.y = 240; bird.vy = 0; bird.rot = 0; bird.inv = 0;
   overT = 0; newBest = false; popups = []; feathers = []; sparks = []; rings = []; booms = []; shots = []; fade = 1;
   spawned = 0; passedPipes = 0; nextBossAt = FIRST_BOSS; bossPending = false; boss = null; bossesBeaten = 0;
-  hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null; shownMove = shownChomp = false;
+  hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null;
   coins = []; slot = null; rev = null; halo = 0; goals = []; confetti = []; flashes = []; shownNew = {};
 }
 
@@ -919,22 +919,29 @@ function pipeShape(p) {
   if (p.kind === 'split') { p.b0 = c - p.bh / 2; p.b1 = c + p.bh / 2; }
 }
 
-// New pipe types, one unlocked per boss beaten, each introduced with a banner the first time.
-const NEW_KINDS = [
+// Special pipes: plain green until the first boss, then each boss beaten unlocks the next type,
+// introduced with a banner the first time. Specials get more common as more are unlocked, and are
+// spread evenly across everything unlocked so far.
+const SPECIAL_KINDS = [
+  { kind: 'move',  banner: ['MOVING PIPES!', 'STAY SHARP'] },
+  { kind: 'chomp', banner: ['CHOMPERS!', 'MIND THE TEETH'] },
   { kind: 'tilt',  banner: ['ANGLED PIPES!', 'MIND THE SLOPE'] },
   { kind: 'rock',  banner: ['ROCKING PIPES!', 'TIME IT RIGHT'] },
   { kind: 'split', banner: ['SPLIT PIPES!', 'PICK A LANE'] },
 ];
 let shownNew = {};
-function newKind() {
-  const open = NEW_KINDS.slice(0, Math.min(bossesBeaten, NEW_KINDS.length));
+function specialKind() {
+  const open = SPECIAL_KINDS.slice(0, Math.min(bossesBeaten, SPECIAL_KINDS.length));
+  if (!open.length) return null;
   const intro = open.find(n => !shownNew[n.kind]);
-  if (intro) {
-    if (banner) return null;                    // wait until the boss's victory banner is gone
+  if (intro && !banner) {                       // (waits until the boss's victory banner is gone)
     shownNew[intro.kind] = true; setBanner(intro.banner[0], intro.banner[1]); sfx('swoosh');
     return intro.kind;
   }
-  return open.length && Math.random() < 0.16 + 0.06 * open.length ? open[Math.random() * open.length | 0].kind : null;
+  const chance = Math.min(0.75, 0.3 + 0.1 * open.length + 0.04 * Math.max(0, bossesBeaten - open.length));
+  if (Math.random() >= chance) return null;
+  const pool = open.filter(n => shownNew[n.kind]);
+  return pool.length ? pool[Math.random() * pool.length | 0].kind : null;
 }
 // Collision against a pipe pair, rotated for angled pipes (the bird is moved into the pipe's frame).
 function hitPipe(p) {
@@ -958,14 +965,10 @@ function spawnPipes() {
     const x = last ? last.x + d.spacing : BIRD_X + 260;
     let top = 60 + Math.random() * (GY - d.gap - 120);
     if (last) top = clamp(top, last.top - d.vary, last.top + d.vary);
-    let r = Math.random(), kind = r < d.chomp ? 'chomp' : r < d.chomp + d.move ? 'move' : 'static';
-    if (d.e >= 10 && !shownMove) { kind = 'move'; shownMove = true; setBanner('MOVING PIPES!', 'STAY SHARP'); sfx('swoosh'); }
-    else if (d.e >= 25 && !shownChomp) { kind = 'chomp'; shownChomp = true; setBanner('CHOMPERS!', 'MIND THE TEETH'); sfx('swoosh'); }
-    const nk = state === 'play' ? newKind() : null;
-    if (nk) kind = nk;
+    const kind = (state === 'play' && specialKind()) || 'static';
     const prev = last;
     last = { x, top, gap: d.gap, kind, t: 0, passed: false, intro: x < LW ? -6 * n++ : INTRO,
-      amp: kind === 'move' ? d.moveAmp : kind === 'chomp' ? d.chompAmp : 0,
+      amp: kind === 'move' ? Math.max(24, d.moveAmp) : kind === 'chomp' ? Math.max(20, d.chompAmp) : 0,
       freq: kind === 'move' ? rand(0.022, 0.04) : rand(0.045, 0.065), phase: rand(0, 6.28), ang: 0 };
     if (kind === 'tilt') { last.ang = (Math.random() < 0.5 ? -1 : 1) * rand(0.16, 0.3); last.gap += 18; }
     if (kind === 'rock') { last.amp = rand(0.2, 0.32); last.freq = rand(0.02, 0.032); last.gap += 22; }
