@@ -382,7 +382,18 @@ function resizeGame(w, h = 512, top = 0) {
   if (d) { BIRD_X = bx; for (const o of [...pipes, ...feathers, ...popups]) o.x += d; }
 }
 
-const cover = () => g.fillRect(0, -TOP, LW, LH + TOP);   // full-screen overlay
+// Full-screen overlay. Also tracks the resulting colour at the top of the screen (for the iPhone
+// status bar strip), so it never has to be read back from the GPU.
+const SKY_RGB = [78, 192, 202];
+let topCol = SKY_RGB.slice();
+const cover = () => {
+  g.fillRect(0, -TOP, LW, LH + TOP);
+  const f = String(g.fillStyle), m = /rgba?\(([^)]+)\)/.exec(f);
+  let c, a = 1;
+  if (m) { const v = m[1].split(',').map(Number); c = v.slice(0, 3); a = v.length > 3 ? v[3] : 1; }
+  else if (f[0] === '#') c = [1, 3, 5].map(i => parseInt(f.slice(i, i + 2), 16));
+  if (c) topCol = topCol.map((v, i) => v * (1 - a) + c[i] * a);
+};
 
 function text(str, x, y, sc = 2, fill = '#fff', ol = '#543847', olw = 2, align = 'c') {
   const c = textImg(String(str).toUpperCase(), sc, fill, ol, olw);
@@ -1820,7 +1831,7 @@ function endForeground() {
 const uiShadow = (x, y, w, h) => { g.fillStyle = 'rgba(28,16,40,0.28)'; g.fillRect(x + 3, y + 4, w, h); };
 
 function draw() {
-  buttons = [];
+  buttons = []; topCol = SKY_RGB.slice();
   g.save();
   const sx = shake ? Math.round((Math.random() - .5) * shake) : 0, sy = shake ? Math.round((Math.random() - .5) * shake) : 0;
   if (shake) g.translate(sx, sy);
@@ -1907,14 +1918,16 @@ function draw() {
 // ============================================================ CRT post-processing (WebGL)
 const screen = document.getElementById('screen');
 const gl = screen.getContext('webgl', { antialias: false, alpha: false });
-let uCrt, uSize, uCurv, uLp, uLc, uLn, uAmb;
-const MAX_LIGHTS = 16;
+const MAX_LIGHTS = 16, HDR = 1.6;   // pass 1 stores colour / HDR so bright lights survive the 8-bit buffer
+// Two passes keep the GPU cool: the expensive work (colour fringing, glow blur, dynamic lights) runs
+// once per game pixel into an offscreen buffer; the full-resolution pass reads it once and only adds
+// scanlines, the aperture grille, vignette and curvature.
+let progA, progB, uA = {}, uB = {}, gameTex, fbo, fboTex, fboW = 0, fboH = 0;
 if (gl) {
   const vs = `attribute vec2 p; varying vec2 uv; void main(){ uv = vec2(p.x*.5+.5, .5-p.y*.5); gl_Position = vec4(p,0.,1.); }`;
-  const fs = `precision mediump float;
-    uniform sampler2D t; uniform float crt; uniform vec2 lsize; uniform float curv; varying vec2 uv;
+  const fsA = `precision mediump float;
+    uniform sampler2D t; uniform float crt; uniform vec2 lsize; varying vec2 uv;
     uniform vec4 lp[${MAX_LIGHTS}]; uniform vec3 lc[${MAX_LIGHTS}]; uniform float ln; uniform float amb;
-    vec2 curve(vec2 p){ p = p*2.-1.; vec2 o = abs(p.yx)/vec2(5.5,4.2); p += p*o*o*curv; return p*.5+.5; }
     vec3 s(vec2 q){ return texture2D(t,q).rgb; }
     // Dynamic point lights (lp: x, y, radius in logical px, intensity). Surfaces in range are
     // tinted and brightened by the light colour, and a soft additive halo blooms around the source.
@@ -1931,15 +1944,24 @@ if (gl) {
       return c*amb + c*tint*1.25 + glow*(.5 + .25*luma);
     }
     void main(){
-      if (crt < .5) { gl_FragColor = vec4(lit(uv, s(uv)),1.); return; }
+      vec3 c = s(uv);
+      if (crt > .5) {                       // colour fringing + soft phosphor glow
+        float ca = .0018;
+        vec3 b = vec3(0.); vec2 px = 2.4/lsize;
+        for (int i=-1;i<=1;i++) for (int j=-1;j<=1;j++) b += s(uv+vec2(float(i),float(j))*px);
+        c = vec3(s(uv+vec2(ca,0.)).r, c.g, s(uv-vec2(ca,0.)).b)*.88 + (b/9.)*.32;
+      }
+      gl_FragColor = vec4(lit(uv, c) / ${HDR.toFixed(2)}, 1.);
+    }`;
+  const fsB = `precision mediump float;
+    uniform sampler2D f; uniform float crt; uniform vec2 lsize; uniform float curv; varying vec2 uv;
+    vec2 curve(vec2 p){ p = p*2.-1.; vec2 o = abs(p.yx)/vec2(5.5,4.2); p += p*o*o*curv; return p*.5+.5; }
+    vec3 P(vec2 q){ return texture2D(f, vec2(q.x, 1.-q.y)).rgb * ${HDR.toFixed(2)}; }
+    void main(){
+      if (crt < .5) { gl_FragColor = vec4(P(uv),1.); return; }
       vec2 q = curve(uv);
       if (q.x<0.||q.x>1.||q.y<0.||q.y>1.) { gl_FragColor = vec4(0.,0.,0.,1.); return; }
-      float ca = .0018;
-      vec3 c = vec3(s(q+vec2(ca,0.)).r, s(q).g, s(q-vec2(ca,0.)).b);
-      vec3 b = vec3(0.); vec2 px = 2.4/lsize;
-      for (int i=-1;i<=1;i++) for (int j=-1;j<=1;j++) b += s(q+vec2(float(i),float(j))*px);
-      c = c*.88 + (b/9.)*.32;
-      c = lit(q, c);
+      vec3 c = P(q);
       float sl = .5+.5*cos((q.y*lsize.y*.5-.5)*6.2831853);
       c *= mix(.68, 1.1, sl);
       float m = mod(gl_FragCoord.x, 3.);
@@ -1954,21 +1976,28 @@ if (gl) {
     }`;
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) log('shader: ' + gl.getShaderInfoLog(s)); return s; };
-  const prog = gl.createProgram();
-  gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(prog); gl.useProgram(prog);
+  const program = (fs, names) => {
+    const pr = gl.createProgram();
+    gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) log('link: ' + gl.getProgramInfoLog(pr));
+    const u = {}; for (const n of names) u[n] = gl.getUniformLocation(pr, n);
+    return [pr, u];
+  };
+  [progA, uA] = program(fsA, ['t', 'crt', 'lsize', 'lp', 'lc', 'ln', 'amb']);
+  [progB, uB] = program(fsB, ['f', 'crt', 'lsize', 'curv']);
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  uCrt = gl.getUniformLocation(prog, 'crt');
-  uSize = gl.getUniformLocation(prog, 'lsize'); uCurv = gl.getUniformLocation(prog, 'curv');
-  uLp = gl.getUniformLocation(prog, 'lp'); uLc = gl.getUniformLocation(prog, 'lc');
-  uLn = gl.getUniformLocation(prog, 'ln'); uAmb = gl.getUniformLocation(prog, 'amb');
+  for (const pr of [progA, progB]) { const loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); }
+  const tex = () => {
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    return t;
+  };
+  gl.activeTexture(gl.TEXTURE1); fboTex = tex();
+  gl.activeTexture(gl.TEXTURE0); gameTex = tex();
+  fbo = gl.createFramebuffer();
+  gl.useProgram(progA); gl.uniform1i(uA.t, 0);
+  gl.useProgram(progB); gl.uniform1i(uB.f, 1);
 }
 const ctx2d = gl ? null : screen.getContext('2d');
 
@@ -2016,12 +2045,26 @@ function gatherLights() {
 function present() {
   if (gl) {
     gatherLights();
-    gl.uniform4fv(uLp, lightP); gl.uniform3fv(uLc, lightC);
-    gl.uniform1f(uLn, lightN); gl.uniform1f(uAmb, ambient);
-    gl.viewport(0, 0, screen.width, screen.height);
+    if (fboW !== game.width || fboH !== game.height) {   // (re)allocate the half-way buffer at game resolution
+      fboW = game.width; fboH = game.height;
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fboW, fboH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+    }
+    // pass 1: game pixels -> glow + lights
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.viewport(0, 0, fboW, fboH);
+    gl.useProgram(progA);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, gameTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, game);
-    gl.uniform1f(uCrt, crtOn ? 1 : 0);
-    gl.uniform2f(uSize, LW, LH + TOP); gl.uniform1f(uCurv, TOUCH ? 0 : wide ? 0.55 : 1);
+    gl.uniform4fv(uA.lp, lightP); gl.uniform3fv(uA.lc, lightC);
+    gl.uniform1f(uA.ln, lightN); gl.uniform1f(uA.amb, ambient);
+    gl.uniform1f(uA.crt, crtOn ? 1 : 0); gl.uniform2f(uA.lsize, LW, LH + TOP);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    // pass 2: full resolution CRT finish
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, screen.width, screen.height);
+    gl.useProgram(progB);
+    gl.uniform1f(uB.crt, crtOn ? 1 : 0); gl.uniform2f(uB.lsize, LW, LH + TOP); gl.uniform1f(uB.curv, TOUCH ? 0 : wide ? 0.55 : 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   } else {
     ctx2d.imageSmoothingEnabled = false; ctx2d.drawImage(game, 0, 0, screen.width, screen.height);
@@ -2141,8 +2184,7 @@ let themeCol = '', themeT = 0;
 function syncThemeColor() {
   if (!TOUCH || ++themeT % 10) return;
   try {
-    const d = g.getImageData(6, 2, 1, 1).data;   // near the left edge, clear of the HUD
-    const col = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+    const col = '#' + topCol.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
     if (col !== themeCol) {
       themeCol = col; themeMeta.content = col;
       document.documentElement.style.background = document.body.style.background = statusBar.style.background = col;
@@ -2152,9 +2194,12 @@ function syncThemeColor() {
 function loop(now) {
   if (updateReady && (state === 'ready' || (state === 'over' && overT > 50))) { updateReady = false; location.reload(); }
   acc = Math.min(acc + now - prev, 250); prev = now;
-  while (acc >= STEP) { if (resumeT) countdownStep(); else if (!paused) update(); acc -= STEP; }
-  level *= 0.9;
-  draw(); present(); syncThemeColor();
+  let stepped = false;
+  while (acc >= STEP) { if (resumeT) countdownStep(); else if (!paused) update(); acc -= STEP; stepped = true; }
+  if (stepped) {           // nothing moved since the last frame: skip drawing (halves the work on 120Hz screens)
+    level *= 0.9;
+    draw(); present(); syncThemeColor();
+  }
   led.className = sensorLive() ? 'on' : '';
   requestAnimationFrame(loop);
 }
