@@ -1912,7 +1912,7 @@ if (gl) {
         c *= pow(v, .25);
         vec2 e = min(q, 1.-q)*lsize;
         c *= smoothstep(0., 3., e.x) * smoothstep(0., 3., e.y);
-      } else c *= pow(v, .08);   // flat glass (phones): light vignette, picture reaches the edges
+      } else c *= pow(4.*q.x*(1.-q.x), .06);   // flat glass (phones): faint side vignette only, top and bottom stay clean
       gl_FragColor = vec4(c*1.18, 1.);
     }`;
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
@@ -2095,12 +2095,24 @@ addEventListener('blur', () => setPaused(true));
 const STEP = 1000 / 60, led = document.getElementById('led');
 let acc = 0, prev = performance.now();
 let updateReady = false;
+// iOS blurs whatever sits under the status bar and tints it with the page's theme colour. Keep that
+// colour matched to the top of the picture so the blurred strip blends in (sky, dark overlays, ...).
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+let themeCol = '', themeT = 0;
+function syncThemeColor() {
+  if (!TOUCH || ++themeT % 10) return;
+  try {
+    const d = g.getImageData(6, 2, 1, 1).data;   // near the left edge, clear of the HUD
+    const col = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+    if (col !== themeCol) { themeCol = col; themeMeta.content = col; document.documentElement.style.background = document.body.style.background = col; }
+  } catch {}
+}
 function loop(now) {
   if (updateReady && (state === 'ready' || (state === 'over' && overT > 50))) { updateReady = false; location.reload(); }
   acc = Math.min(acc + now - prev, 250); prev = now;
   while (acc >= STEP) { if (resumeT) countdownStep(); else if (!paused) update(); acc -= STEP; }
   level *= 0.9;
-  draw(); present();
+  draw(); present(); syncThemeColor();
   led.className = sensorLive() ? 'on' : '';
   requestAnimationFrame(loop);
 }
