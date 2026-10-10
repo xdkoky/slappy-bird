@@ -1605,17 +1605,19 @@ function drawBeam() {
 function drawSlot() {
   const s = slot, MW = 212, LV = 28, ol = '#2a1018';
   const ein = 1 - (1 - clamp(s.t / 22, 0, 1)) ** 3, out = state === 'revive' ? rev.t / 30 : 0;
-  g.fillStyle = `rgba(20,12,24,${0.6 * ein * (1 - out)})`; cover();
+  g.fillStyle = `rgba(16,10,22,${0.74 * ein * (1 - out)})`; cover();
   if (s.t <= 0) return;
   const oy = Math.round(((1 - ein) * 420 + out * out * 480) / 2) * 2;   // slide offset for the whole stack
-  const mx = Math.round((LW - MW - LV) / 4) * 2, my = 46 - oy;
+  // vertical rhythm: fixed block heights, the leftover height is shared out evenly between them
+  const gap = clamp(Math.floor((LH - 28 - 392) / 7 / 2) * 2, 6, 28), hy0 = 12 - oy;
+  const mx = Math.round((LW - MW - LV) / 4) * 2, my = hy0 + 34 + gap;
   const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(mx + x, my + y, w, h); };
   const rr = (x, y, w, h, c, cut = 2) => { R(x + cut, y, w - cut * 2, h, c); R(x, y + cut, w, h - cut * 2, c); };
   const party = s.phase === 'jackpot', fast = s.phase === 'spin', idle = s.phase === 'idle' || s.phase === 'result';
 
   // header: CONTINUE? + countdown badge
   if (idle) {
-    const n = Math.max(0, Math.ceil(s.count / 60)), hx = LW / 2 - 20, hy = 10 - oy;
+    const n = Math.max(0, Math.ceil(s.count / 60)), hx = LW / 2 - 20, hy = hy0;
     bigText('CONTINUE?', hx, hy, 3);
     const bx = hx + tw('CONTINUE?', 3) / 2 + 26, by = hy + 11, hot = n <= 3 && (tick >> 3) & 1;
     pcircle(bx, by, 18, '#543847'); pcircle(bx, by, 16, '#fff'); pcircle(bx, by, 13, hot ? '#f83850' : '#e86a17');
@@ -1673,26 +1675,27 @@ function drawSlot() {
   if (s.res && (tick >> 3) & 1) R(18, cy - 1, MW - 36, 2, 'rgba(248,56,80,0.7)');
 
   // pay table: all four prizes at once, the one just won blinks
-  const pw = Math.min(LW - 20, 300), px = Math.round((LW - pw) / 2), py = my + 200;
+  const pw = Math.min(LW - 24, 256), px = Math.round((LW - pw) / 2), py = my + 196 + gap;
   drawPanel(px, py, pw, 50);
   const rows = [['heart', 'REVIVE', null], ['seven', '+3', tokenSmall], ['bell', '+100', coinSmall], ['coin', '+50', coinSmall]];
   rows.forEach(([sym, label, icon], i) => {
-    const cx0 = px + 10 + (i % 2) * Math.round(pw / 2), cy0 = py + 6 + (i >> 1) * 22;
+    const cx0 = px + 8 + (i % 2) * Math.round(pw / 2), cy0 = py + 6 + (i >> 1) * 22;
     const hit = s.res && s.out && s.out.every(o => o === sym);
     if (hit && (tick >> 3) & 1) { g.fillStyle = '#fff8d8'; g.fillRect(cx0 - 4, cy0 - 2, Math.round(pw / 2) - 12, 20); }
-    for (let k = 0; k < 3; k++) g.drawImage(SYM[sym], cx0 + k * 13, cy0, 14, 14);
-    text(label, cx0 + 46, cy0 + 1, 2, sym === 'heart' ? '#c2310c' : '#543847', '#000', 0, 'l');
-    if (icon) g.drawImage(icon, cx0 + 46 + tw(label) + 4, cy0, 14, 14);
+    for (let k = 0; k < 3; k++) g.drawImage(SYM[sym], cx0 + k * 12, cy0, 13, 13);
+    text(label, cx0 + 42, cy0 + 1, 2, sym === 'heart' ? '#c2310c' : '#543847', '#000', 0, 'l');
+    if (icon) g.drawImage(icon, cx0 + 42 + tw(label) + 3, cy0, 13, 13);
   });
 
   // credits
-  const crY = py + 56, crS = String(Math.min(tokens, 99)), coS = String(Math.min(bank, 9999));
+  const crY = py + 50 + gap, crS = String(Math.min(tokens, 99)), coS = String(Math.min(bank, 9999));
   const crW = 20 + tw(crS) + 20 + 20 + tw(coS), crX = Math.round((LW - crW) / 2);
-  counter(tokenSmall, crS, tokenBump, crX, crY, 'l');
-  counter(coinSmall, coS, coinBump, crX + 20 + tw(crS) + 20, crY, 'l');
+  chip(crX - 12, crY - 8, crW + 24, 30);
+  counter(tokenSmall, crS, tokenBump, crX, crY, 'l', true);
+  counter(coinSmall, coS, coinBump, crX + 20 + tw(crS) + 20, crY, 'l', true);
 
   // big SPIN button: the close-up of the cabinet's button, and the thing to tap
-  const bw = 156, bh = 48, bx = Math.round((LW - bw) / 2), by = crY + 22, can = canSpin() && idle;
+  const bw = 156, bh = 48, bx = Math.round((LW - bw) / 2), by = crY + 22 + gap, can = canSpin() && idle;
   const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10);
   if (!party) {
     const dy = pressed ? 4 : 0, BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
@@ -1708,22 +1711,22 @@ function drawSlot() {
     text(label, bx + bw / 2, by + 13 + dy, label === 'SPIN' ? 3 : 2, '#fff', '#7a0c20', 2);
     if (can) buttons.push({ x: bx - 6, y: by - 6, w: bw + 12, h: bh + 18, act: () => { if (slot.t > 30) spin(); } });
     if (can && s.t > 30) {                                                  // pointing hand taps the button
-      const tap = (tick / 20 | 0) % 2 === 0, hx = bx + bw - 14, hy = by + bh - 20 + (tap ? 0 : 5);
+      const tap = (tick / 20 | 0) % 2 === 0, hx = bx + bw - 4, hy = by + bh - 14 + (tap ? 0 : 5);
       if (tap) { g.fillStyle = '#fff'; g.fillRect(hx - 6, hy - 6, 2, 6); g.fillRect(hx + 4, hy - 10, 2, 6); g.fillRect(hx + 14, hy - 6, 2, 6); }
       g.drawImage(HAND, hx - 4, hy, 24, 24);
     }
   }
 
   // status line + give up
-  const ty = by + bh + 14;
-  if (s.phase === 'idle') text(tokens > 0 ? 'ONE SPIN COSTS 1 TOKEN' : 'ONE SPIN COSTS 50 COINS', LW / 2, ty, 2, '#fff', '#543847');
+  const ty = by + bh + 8 + gap / 2;
+  if (s.phase === 'idle') text(tokens > 0 ? 'COSTS 1 TOKEN' : 'COSTS 50 COINS', LW / 2, ty, 2, '#c8bcd0', '#000', 0);
   else if (s.phase === 'result') bigText(s.msg, LW / 2, ty - 6, 3, s.res === 'win' ? '#ffe14d' : '#fca048', s.res === 'win' ? '#f0a020' : '#e06010');
   else if (party) {
     const cols = ['#ffe14d', '#fff', '#ff8a9a'];
     bigText(s.msg, LW / 2, by - 4, 5, cols[(tick >> 2) % 3], '#f0a020');
   }
   if (idle && s.t > 30)
-    button(Math.round((LW - 140) / 2), ty + 30, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp, false);
+    button(Math.round((LW - 140) / 2), ty + 26 + gap, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp, false);
 }
 
 function drawBoss() {
