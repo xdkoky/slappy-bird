@@ -2830,9 +2830,33 @@ addEventListener('keydown', e => {
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
 });
+// On phones a swipe from the bottom edge (home / app switcher gesture) starts as a touch on the game.
+// So on menus, while paused, and for touches starting at the bottom edge, a touch only counts when the
+// finger lifts without having slid away. Mid-run flaps elsewhere still fire instantly on touch-down.
+let heldTap = null;
+const EDGE_PX = 44;   // CSS px at the bottom of the screen where the system gestures start
 screen.addEventListener('pointerdown', e => {
   audioInit();
-  const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * (LH + TOP) - TOP;
+  const r = screen.getBoundingClientRect();
+  const atEdge = r.bottom - e.clientY < EDGE_PX;
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || notesPage >= 0)) {
+    heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    return;
+  }
+  handleTap(e.clientX, e.clientY);
+});
+screen.addEventListener('pointermove', e => {
+  if (heldTap && heldTap.id === e.pointerId && Math.hypot(e.clientX - heldTap.x, e.clientY - heldTap.y) > 12) heldTap = null;   // a swipe, not a tap
+});
+screen.addEventListener('pointerup', e => {
+  const h = heldTap; heldTap = null;
+  if (!h || h.id !== e.pointerId || document.hidden || Math.hypot(e.clientX - h.x, e.clientY - h.y) > 12 || performance.now() - h.t > 600) return;
+  handleTap(h.x, h.y);
+});
+screen.addEventListener('pointercancel', () => { heldTap = null; });
+document.addEventListener('visibilitychange', () => { heldTap = null; });
+function handleTap(cx, cy) {
+  const r = screen.getBoundingClientRect(), x = (cx - r.left) / r.width * LW, y = (cy - r.top) / r.height * (LH + TOP) - TOP;
   if (TOUCH && paused) return setPaused(false);
   const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
   if (b) return pressButton(b);
@@ -2840,7 +2864,7 @@ screen.addEventListener('pointerdown', e => {
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   if (race.panel) return;
   flap('click');
-});
+}
 if (TOUCH) {
   // no scrolling, rubber-banding, double-tap zoom or pinch; unlock audio on the first touch
   for (const t of ['touchstart', 'touchmove', 'gesturestart', 'dblclick'])
