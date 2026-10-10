@@ -51,6 +51,9 @@
     text-transform:uppercase; letter-spacing:2px; color:#543847; background:#fff8d8; border:3px solid #543847; border-radius:0; outline:none; }
   #namebox button { font:700 15px Menlo, monospace; padding:9px 0; width:46%; border:3px solid #543847; color:#fff; background:#e86a17; }
   #namebox button[value=cancel] { background:#b4a88c; }
+  #namebox .sub { margin-top:6px; font-size:12px; font-weight:400; color:#8a7438; }
+  #namebox .sub:empty { display:none; }
+  #namebox input::placeholder { color:#b8ac80; }
   #namebox .msg { min-height:18px; margin:-6px 0 10px; font-size:13px; color:#c2310c; }
 </style>
 </head>
@@ -59,6 +62,7 @@
 <div id="statusbar"></div>
 <div id="namebox"><form>
   <div class="ttl">YOUR NAME</div>
+  <div class="sub"></div>
   <input maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
   <div class="msg"></div>
   <button type="submit" value="ok">OK</button> <button type="button" value="cancel">CANCEL</button>
@@ -95,9 +99,11 @@ const LB_ON = !!(LB_URL && LB_KEY);
 // Web pages can't see the device or Game Center name, so the default is a random bird name.
 const randHex = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
 const newUUID = () => crypto.randomUUID ? crypto.randomUUID() : randHex(16).replace(/^(.{8})(.{4})(.{4})(.{4})/, '$1-$2-$3-$4-');
+const NAME_A = ['SWIFT', 'LUCKY', 'BRAVE', 'ZIPPY', 'FUZZY', 'MIGHTY', 'SNEAKY', 'TURBO', 'JUMPY', 'NIFTY', 'SPEEDY', 'COSMIC'];
+const NAME_B = ['DUCK', 'CROW', 'OWL', 'HAWK', 'WREN', 'JAY', 'DOVE', 'KIWI', 'ROBIN', 'FINCH', 'PUFFIN', 'GULL'];
+const isRandomName = n => { const m = /^([A-Z]+) ([A-Z]+)( \d+)?$/.exec(n); return !!m && NAME_A.includes(m[1]) && NAME_B.includes(m[2]); };
 function randomName() {
-  const A = ['SWIFT', 'LUCKY', 'BRAVE', 'ZIPPY', 'FUZZY', 'MIGHTY', 'SNEAKY', 'TURBO', 'JUMPY', 'NIFTY', 'SPEEDY', 'COSMIC'];
-  const B = ['DUCK', 'CROW', 'OWL', 'HAWK', 'WREN', 'JAY', 'DOVE', 'KIWI', 'ROBIN', 'FINCH', 'PUFFIN', 'GULL'];
+  const A = NAME_A, B = NAME_B;
   let n; do n = A[Math.random() * A.length | 0] + ' ' + B[Math.random() * B.length | 0]; while (n.length > 12); return n;
 }
 const cleanName = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
@@ -109,12 +115,14 @@ const player = {
   pending: Math.max(SAVED.pend | 0, idStore.pend | 0),   // best score not yet uploaded (offline)
   named: (SAVED.pnamed ?? idStore.pnamed) !== false,     // false = renamed, server doesn't know yet
   bestSynced: !!(SAVED.pbsync || idStore.pbsync),        // has the best from before the leaderboard been uploaded?
+  picked: !!(SAVED.ppick || idStore.ppick),              // has the player chosen a nickname (or skipped the prompt)?
 };
+if (!isRandomName(player.name)) player.picked = true;   // already has a real name
 
 function save() {
   const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens,
-    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced };
-  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync })); } catch {}
+    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced, ppick: player.picked };
+  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync, ppick: d.ppick })); } catch {}
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -1426,6 +1434,7 @@ function updateFX() {
 
 function update() {
   tick++;
+  if (state === 'over' && overT === 60 && LB_ON && !player.picked && !raceOn() && !nameBoxOpen) editName(true);
   if (race.phase !== 'off' || race.panel) raceTick();
   if (hitstop > 0) { hitstop--; updateFX(); return; }                       // impact freeze
   if (slowmo > 0) { slowmo--; if (slowmo % 3) { updateFX(); return; } }      // final-blow slow motion
@@ -2157,12 +2166,17 @@ function openCodeBox() {
   box.querySelector('.ttl').textContent = 'ROOM CODE'; inp.maxLength = 4; inp.value = ''; nameMsg(''); box.style.display = 'flex';
   setTimeout(() => inp.focus(), 50);
 }
-function editName() {
+function editName(welcome = false) {
   if (nameBoxOpen) return;
-  nameBoxOpen = true; boxMode = 'name'; sfx('blip', true);
+  nameBoxOpen = true; boxMode = welcome ? 'welcome' : 'name'; sfx('blip', true);
   const box = document.getElementById('namebox'), inp = box.querySelector('input');
-  box.querySelector('.ttl').textContent = 'YOUR NAME'; inp.maxLength = 12;
-  inp.value = player.name; box.style.display = 'flex';
+  box.querySelector('.ttl').textContent = welcome ? 'PICK A NICKNAME' : 'YOUR NAME';
+  box.querySelector('.sub').textContent = welcome ? 'THIS IS HOW OTHER PLAYERS SEE YOU ON THE LEADERBOARD' : '';
+  box.querySelector('button[value=ok]').textContent = welcome ? 'SAVE' : 'OK';
+  box.querySelector('button[value=cancel]').textContent = welcome ? 'SKIP' : 'CANCEL';
+  inp.maxLength = 12; nameMsg('');
+  inp.value = welcome ? '' : player.name; inp.placeholder = welcome ? player.name : '';   // just tap and type
+  box.style.display = 'flex';
   setTimeout(() => { inp.focus(); inp.select(); }, 50);
 }
 function nameMsg(t) { document.querySelector('#namebox .msg').textContent = t; }
@@ -2175,6 +2189,7 @@ function closeNameBox(ok) {
     if (code.length !== 4) { nameMsg('CODES HAVE 4 LETTERS'); return; }
     done(); raceJoin(code); return;
   }
+  if (boxMode === 'welcome') { player.picked = true; save(); }   // asked once, whatever the answer
   const n = ok ? cleanName(inp.value) : '';
   if (!n || n === player.name) return done();
   if (!LB_ON) { player.name = n; save(); sfx('blip', true); return done(); }
@@ -2182,7 +2197,7 @@ function closeNameBox(ok) {
   nameMsg('CHECKING...');
   lbCall('submit_score', { p_id: player.id, p_secret: player.secret, p_name: n, p_score: 0 })
     .then(stored => {
-      if (stored === n) { player.name = n; player.named = true; save(); lb.data.week = lb.data.all = null; if (lb.open) lbLoad(); sfx('blip', true); done(); }
+      if (stored === n) { player.name = n; player.named = true; player.picked = true; save(); lb.data.week = lb.data.all = null; if (lb.open) lbLoad(); sfx('blip', true); done(); }
       else { if (typeof stored === 'string' && stored) { player.name = stored; save(); } nameMsg('THAT NAME IS TAKEN'); sfx('blip', false); inp.focus(); inp.select(); }
     })
     .catch(() => { player.name = n; player.named = false; save(); lbFlush(); done(); });   // offline: try it later
