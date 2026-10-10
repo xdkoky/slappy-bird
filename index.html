@@ -1545,25 +1545,59 @@ function wideControls() {
 
 // Touch buttons are drawn into the game canvas; taps are hit-tested against the rects collected each frame.
 let buttons = [];
-// Orange button with a white rim (greyed out when off).
-function button(x, y, w, h, label, act, on = true) {
+// Press animation: a tapped button sinks in, then springs back; its action runs once the press
+// has been seen. Buttons are identified frame to frame by position and width.
+let pressed = null, pendingAct = null;
+const PRESS_DOWN = 70, PRESS_HOLD = 120, PRESS_UP = 220, PRESS_FIRE = 110;   // ms
+function pressAmount(key) {
+  if (!pressed || pressed.key !== key) return 0;
+  const e = performance.now() - pressed.t0;
+  if (e < PRESS_DOWN) return e / PRESS_DOWN;
+  if (e < PRESS_HOLD) return 1;
+  if (e < PRESS_UP) { const k = (e - PRESS_HOLD) / (PRESS_UP - PRESS_HOLD); return Math.max(0, 1 - k * k * (3 - 2 * k)); }
+  pressed = null; return 0;
+}
+function pressButton(b) {
+  if (pendingAct) return;                        // one press at a time
+  pressed = { key: b.key, t0: performance.now() };
+  if (!b.key) return b.act();                    // (hint keycaps have no animation)
+  pendingAct = b.act;
+  setTimeout(() => { const a = pendingAct; pendingAct = null; if (a) a(); }, PRESS_FIRE);
+}
+
+// Orange button with a white rim (greyed out when off). Pushes in when tapped.
+// tab: part of a toggle group (e.g. WEEKLY / ALL TIME): the selected one stays pressed in,
+// the others stand raised in cream.
+function button(x, y, w, h, label, act, on = true, tab = null) {
   const R = (rx, ry, rw, rh, c) => { g.fillStyle = c; g.fillRect(rx, ry, rw, rh); };
-  uiShadow(x, y, w, h);
-  R(x, y, w, h, '#543847'); R(x + 2, y + 2, w - 4, h - 4, '#fff');
-  R(x + 4, y + 4, w - 8, h - 8, on ? '#e86a17' : '#b4a88c');
-  R(x + 4, y + 4, w - 8, 2, on ? '#f8a050' : '#cdc3aa');            // top highlight
-  R(x + 4, y + h - 8, w - 8, 4, on ? '#c24e0a' : '#968a70');        // bottom shade
-  if (label) {
-    const ly = Math.round(y + (h - 14) / 2) - 1;
-    text(label, x + w / 2, ly + 2, 2, on ? '#8a3006' : '#706650', '#000', 0);
-    text(label, x + w / 2, ly, 2, on ? '#fff' : '#ece4d0', '#000', 0);
+  const key = x + '|' + y + '|' + w, sel = tab === 'on';
+  const d = Math.max(pressAmount(key), sel ? 1 : 0), dy = Math.round(d * 3);
+  if (d < 1) uiShadow(x, y + dy, w, h - dy);
+  else { g.fillStyle = 'rgba(28,16,40,0.2)'; g.fillRect(x + 1, y + 2, w, h); }
+  const raisedTab = tab === 'off';
+  const face = raisedTab ? '#fff8d8' : sel ? '#c95510' : on ? '#e86a17' : '#b4a88c';
+  const hi = raisedTab ? '#ffffff' : on ? '#f8a050' : '#cdc3aa';
+  const lo = raisedTab ? '#d8cca0' : on ? '#c24e0a' : '#968a70';
+  R(x, y + dy, w, h - dy, '#543847'); R(x + 2, y + 2 + dy, w - 4, h - 4 - dy, '#fff');
+  R(x + 4, y + 4 + dy, w - 8, h - 8 - dy, face);
+  if (d > 0.5) R(x + 4, y + 4 + dy, w - 8, 2, sel ? '#8a3006' : on ? '#b04408' : '#8a7e64');   // pressed: inner shadow on top
+  else {
+    R(x + 4, y + 4 + dy, w - 8, 2, hi);                                     // raised: top highlight...
+    R(x + 4, y + h - 8, w - 8, 4 - dy, lo);                                 // ...and a lip that flattens as it goes down
   }
-  buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act });
+  if (label) {
+    const ly = Math.round(y + (h - 14) / 2) - 1 + dy;
+    const fg = raisedTab ? '#c24e0a' : on ? '#fff' : '#ece4d0', sh = raisedTab ? '#e8dcb0' : on ? '#8a3006' : '#706650';
+    if (d < 0.5) text(label, x + w / 2, ly + 2, 2, sh, '#000', 0);
+    text(label, x + w / 2, ly, 2, fg, '#000', 0);
+  }
+  buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act, key });
 }
 function pauseButton(x, y) {
   button(x, y, 30, 32, '', () => setPaused(true));
-  g.fillStyle = '#8a3006'; g.fillRect(x + 10, y + 10, 4, 12); g.fillRect(x + 18, y + 10, 4, 12);
-  g.fillStyle = '#fff'; g.fillRect(x + 9, y + 9, 4, 12); g.fillRect(x + 17, y + 9, 4, 12);
+  const dy = Math.round(pressAmount(x + '|' + y + '|30') * 3);
+  if (!dy) { g.fillStyle = '#8a3006'; g.fillRect(x + 10, y + 10, 4, 12); g.fillRect(x + 18, y + 10, 4, 12); }
+  g.fillStyle = '#fff'; g.fillRect(x + 9, y + 9 + dy, 4, 12); g.fillRect(x + 17, y + 9 + dy, 4, 12);
 }
 // "TAP" tutorial for the title screen: ghost bird flapping up, arrow, tapping hand and a red tag.
 const GHOST = { k:'#7c7c8c', y:'#d8dce4', Y:'#eef0f4', o:'#c2c6d0', w:'#ffffff', v:'#f4f4f6', r:'#b4b8c2', R:'#a4a8b2' };
@@ -1715,8 +1749,8 @@ function drawLB() {
   drawPanel(x, y, w, h);
   text('LEADERBOARD', LW / 2, y + 12, 3, '#fff', '#543847', 2);
   const tw2 = Math.round((w - 36) / 2);
-  button(x + 14, y + 46, tw2, 28, 'WEEKLY', () => { lb.tab = 'week'; sfx('blip', true); }, lb.tab === 'week');
-  button(x + w - 14 - tw2, y + 46, tw2, 28, 'ALL TIME', () => { lb.tab = 'all'; sfx('blip', true); }, lb.tab === 'all');
+  button(x + 14, y + 46, tw2, 28, 'WEEKLY', () => { if (lb.tab !== 'week') { lb.tab = 'week'; sfx('blip', true); } }, true, lb.tab === 'week' ? 'on' : 'off');
+  button(x + w - 14 - tw2, y + 46, tw2, 28, 'ALL TIME', () => { if (lb.tab !== 'all') { lb.tab = 'all'; sfx('blip', true); } }, true, lb.tab === 'all' ? 'on' : 'off');
   text(lb.tab === 'week' ? 'RESETS EVERY MONDAY' : 'BEST SCORES EVER', LW / 2, y + 82, 2, '#8a7438', '#000', 0);
   const d = lb.data[lb.tab], ly0 = y + 108;
   if (!d) text('LOADING...', LW / 2, ly0 + 100, 2, '#8a7438', '#000', 0);
@@ -2068,7 +2102,7 @@ function drawSlot() {
 
   // big SPIN button: the close-up of the cabinet's button, and the thing to tap
   const bw = 156, bh = 48, bx = Math.round((LW - bw) / 2), by = crY + 22 + gap, can = canSpin() && idle;
-  const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10);
+  const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10) || pressAmount('spin') > 0.3;
   if (!party) {
     const dy = pressed ? 4 : 0, BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
     const rrB = (x, y, w, h, c, cut) => { BR(x + cut, y, w - cut * 2, h, c); BR(x, y + cut, w, h - cut * 2, c); BR(x + cut / 2, y + cut / 2, w - cut, h - cut, c); };
@@ -2082,7 +2116,7 @@ function drawSlot() {
     BR(18, 12 + dy, bw - 36, 4, can || pressed ? '#ff9aa8' : '#c8b8c0');   // shine
     const label = !idle && !pressed ? '' : can || pressed ? 'SPIN' : 'NO TOKENS';
     text(label, bx + bw / 2, by + 13 + dy, label === 'SPIN' ? 3 : 2, '#fff', '#7a0c20', 2);
-    if (can) buttons.push({ x: bx - 6, y: by - 6, w: bw + 12, h: bh + 18, act: () => { if (slot.t > 30) spin(); } });
+    if (can) buttons.push({ x: bx - 6, y: by - 6, w: bw + 12, h: bh + 18, act: () => { if (slot.t > 30) spin(); }, key: 'spin' });
     if (can && s.t > 30) {                                                  // pointing hand taps the button
       const tap = (tick / 20 | 0) % 2 === 0, hx = bx + bw - 4, hy = by + bh - 14 + (tap ? 0 : 5);
       if (tap) { g.fillStyle = '#fff'; g.fillRect(hx - 6, hy - 6, 2, 6); g.fillRect(hx + 4, hy - 10, 2, 6); g.fillRect(hx + 14, hy - 6, 2, 6); }
@@ -2527,7 +2561,7 @@ screen.addEventListener('pointerdown', e => {
   const r = screen.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * LW, y = (e.clientY - r.top) / r.height * (LH + TOP) - TOP;
   if (TOUCH && paused) return setPaused(false);
   const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
-  if (b) return b.act();
+  if (b) return pressButton(b);
   if (settingsOpen) { const q = settingsRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSettings(); return; }
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   flap('click');
