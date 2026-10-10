@@ -359,14 +359,17 @@ function textImg(str, sc, fill, ol, olw) {
 let LH = 512; const GY = 400;
 let LW = 288, BIRD_X = 80, wide = false, fullscreen = false;
 let TOP = 0;   // extra sky above the play area (under the iPhone status bar), in logical px
-const game = document.createElement('canvas');
-const g = game.getContext('2d');
+const game = document.createElement('canvas'), gMain = game.getContext('2d');
+let g = gMain;   // current draw target; swapped to the foreground layer while the world's foreground is drawn
+// Foreground layer (pipes, coins, boss, shots, bird...) and its tinted copy, used for the drop shadow.
+const fgLayer = document.createElement('canvas'), fgx = fgLayer.getContext('2d');
+const shLayer = document.createElement('canvas'), shx = shLayer.getContext('2d');
 function resizeGame(w, h = 512, top = 0) {
   w = Math.max(288, Math.min(1200, Math.round(w / 2) * 2)); h = Math.round(h / 2) * 2; top = Math.round(top / 2) * 2;
   if (w === LW && h === LH && top === TOP && game.width === w * 2) return;
   LW = w; LH = h; TOP = top; wide = LW >= 520;
-  game.width = LW * 2; game.height = (LH + TOP) * 2;
-  g.setTransform(2, 0, 0, 2, 0, TOP * 2); g.imageSmoothingEnabled = false;
+  game.width = fgLayer.width = shLayer.width = LW * 2; game.height = fgLayer.height = shLayer.height = (LH + TOP) * 2;
+  for (const c of [gMain, fgx]) { c.setTransform(2, 0, 0, 2, 0, TOP * 2); c.imageSmoothingEnabled = false; }
   // keep the bird about a quarter in; shift the world with it so a running game stays consistent
   const bx = wide ? Math.round(Math.min(LW * 0.26, 220) / 2) * 2 : 80, d = bx - BIRD_X;
   if (d) { BIRD_X = bx; for (const o of [...pipes, ...feathers, ...popups]) o.x += d; }
@@ -1247,6 +1250,7 @@ const sensorLive = () => performance.now() - lastAccel < 1000;
 
 // ============================================================ rendering
 function drawPanel(x, y, w, h) {
+  uiShadow(x - 4, y - 4, w + 8, h + 8);
   g.fillStyle = '#543847'; g.fillRect(x - 4, y - 4, w + 8, h + 8);
   g.fillStyle = '#fff8d8'; g.fillRect(x - 2, y - 2, w + 4, h + 4);
   g.fillStyle = '#ded895'; g.fillRect(x, y, w, h);
@@ -1280,6 +1284,7 @@ function drawMeter(y) {   // compact (portrait) layout
 
 const tw = (s, sc = 2) => s.length * 6 * sc - sc;           // text width
 function chip(x, y, w, h) {
+  uiShadow(x, y, w, h);
   g.fillStyle = '#543847'; g.fillRect(x, y, w, h);
   g.fillStyle = '#fff8d8'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
   g.fillStyle = '#3e2a36'; g.fillRect(x + 4, y + 4, w - 8, h - 8);
@@ -1333,6 +1338,7 @@ let buttons = [];
 // Orange button with a white rim (greyed out when off).
 function button(x, y, w, h, label, act, on = true) {
   const R = (rx, ry, rw, rh, c) => { g.fillStyle = c; g.fillRect(rx, ry, rw, rh); };
+  uiShadow(x, y, w, h);
   R(x, y, w, h, '#543847'); R(x + 2, y + 2, w - 4, h - 4, '#fff');
   R(x + 4, y + 4, w - 8, h - 8, on ? '#e86a17' : '#b4a88c');
   R(x + 4, y + 4, w - 8, 2, on ? '#f8a050' : '#cdc3aa');            // top highlight
@@ -1698,6 +1704,7 @@ function drawSlot() {
   if (!party) {
     const dy = pressed ? 4 : 0, BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
     const rrB = (x, y, w, h, c, cut) => { BR(x + cut, y, w - cut * 2, h, c); BR(x, y + cut, w, h - cut * 2, c); BR(x + cut / 2, y + cut / 2, w - cut, h - cut, c); };
+    uiShadow(bx + 4, by + 4, bw - 8, bh + 2);
     rrB(0, 0, bw, bh + 6, '#543847', 10);                                   // bezel
     rrB(2, 2, bw - 4, bh + 2, '#d8dce8', 9); rrB(4, 4 + bh - 4, bw - 8, 6, '#8890a8', 4);
     rrB(6, 6 + dy, bw - 12, bh - 8 - dy, '#2a1018', 8);                     // button cap
@@ -1785,16 +1792,45 @@ function drawBanner() {
   if (b.kind === 'warning' && bossesBeaten === 1 && b.t > 40) text('ONLY PINK ONES BOUNCE!', LW / 2, cy + h / 2 + 10, 2, '#fff', '#c0208a');
 }
 
+// Everything drawn between beginForeground() and endForeground() casts a soft drop shadow onto the
+// background: the layer is tinted dark, drawn twice slightly offset (a cheap soft edge), then the layer itself.
+function beginForeground(sx, sy) {
+  g = fgx;
+  fgx.setTransform(1, 0, 0, 1, 0, 0); fgx.clearRect(0, 0, fgLayer.width, fgLayer.height);
+  fgx.setTransform(2, 0, 0, 2, sx * 2, (TOP + sy) * 2);
+}
+function endForeground() {
+  g = gMain;
+  shx.globalCompositeOperation = 'copy'; shx.drawImage(fgLayer, 0, 0);
+  shx.globalCompositeOperation = 'source-in'; shx.fillStyle = '#1c1028'; shx.fillRect(0, 0, shLayer.width, shLayer.height);
+  shx.globalCompositeOperation = 'source-over';
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 0.13; g.drawImage(shLayer, 10, 12);
+  g.globalAlpha = 0.17; g.drawImage(shLayer, 6, 7);
+  g.globalAlpha = 1; g.drawImage(fgLayer, 0, 0);
+  g.restore();
+}
+const uiShadow = (x, y, w, h) => { g.fillStyle = 'rgba(28,16,40,0.28)'; g.fillRect(x + 3, y + 4, w, h); };
+
 function draw() {
   buttons = [];
   g.save();
-  if (shake) g.translate(Math.round((Math.random() - .5) * shake), Math.round((Math.random() - .5) * shake));
+  const sx = shake ? Math.round((Math.random() - .5) * shake) : 0, sy = shake ? Math.round((Math.random() - .5) * shake) : 0;
+  if (shake) g.translate(sx, sy);
 
   // background (tiled, slow parallax)
   const bx = -Math.round(bgX / 2) * 2;
   for (let x = bx; x < LW; x += 288) g.drawImage(bg, x, 0, 288, 400);
   g.fillStyle = '#4ec0ca'; g.fillRect(-10, -TOP - 10, LW + 20, TOP + 10);
 
+  // ground (drawn before the foreground so shadows fall onto it)
+  const gx = -Math.round(groundX / 2) * 2;
+  for (let x = gx; x < LW; x += 312) g.drawImage(ground, x, GY, 312, 112);
+  if (LH > 512) { g.fillStyle = '#ded895'; g.fillRect(-10, 512, LW + 20, LH - 502); }
+  if (state === 'revive') drawBeam();
+
+  beginForeground(sx, sy);
+  g.save(); g.beginPath(); g.rect(-20, -TOP - 20, LW + 40, GY + TOP + 20); g.clip();   // pipes tuck behind the ground
   for (const p of pipes) {
     const x = Math.round(p.x / 2) * 2;
     const t = Math.max(0, Math.min(1, p.intro / INTRO)), e = 1 - (1 - t) ** 3;   // ease-out grow-in
@@ -1804,16 +1840,11 @@ function draw() {
     drawPipe(x, -10 - up, Math.round(p.y0 / 2) * 2 - up, true, pal, teeth);
     drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + dn, false, pal, teeth);
   }
+  g.restore();
 
   for (const c of coins) if (c.token) drawToken(c); else if (!c.pipe || c.pipe.intro >= INTRO) drawCoin(c);
-  if (state === 'revive') drawBeam();
   if (boss) drawBoss();
   for (const s of shots) drawShot(s);
-
-  // ground
-  const gx = -Math.round(groundX / 2) * 2;
-  for (let x = gx; x < LW; x += 312) g.drawImage(ground, x, GY, 312, 112);
-  if (LH > 512) { g.fillStyle = '#ded895'; g.fillRect(-10, 512, LW + 20, LH - 502); }
 
   for (const p of sparks) { g.fillStyle = p.col; const z = p.sz * (p.life > 6 ? 1 : 0.5); g.fillRect(Math.round(p.x / 2) * 2, Math.round(p.y / 2) * 2, Math.max(2, z), Math.max(2, z)); }
   for (const b of booms) drawBoom(b);
@@ -1834,6 +1865,7 @@ function draw() {
     g.restore();
   }
   if ((state === 'revive' && rev.t > 30) || (halo > 0 && (halo > 40 || (tick >> 2) & 1))) drawHalo(BIRD_X, Math.round(bird.y) - 22);
+  endForeground();
 
   for (const p of popups) { g.globalAlpha = Math.min(1, p.life / 12); const hw = tw(p.s, p.sc) / 2 + 6; text(p.s, clamp(p.x, hw, LW - hw), p.y, p.sc, p.fill, p.ol); }
   g.globalAlpha = 1;
@@ -1953,6 +1985,7 @@ function addLight(x, y, r, k, rgb) {
 }
 function gatherLights() {
   lightN = 0;
+  if (notesPage >= 0 || settingsOpen) return;   // menus sit on top of the world, keep glows off them
   const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 90);
   for (const b of booms) if (b.t >= 0) {                                  // explosions flare hot, then fade
     const k = 1 - b.t / b.life;
