@@ -1802,6 +1802,7 @@ function present() {
 
 function layout() {
   if (TOUCH) {                             // fill the whole screen; the HUD stays below the status bar
+    fitStandalone();
     const r = document.getElementById('monitor').getBoundingClientRect();
     const inset = parseFloat(getComputedStyle(document.getElementById('safe')).paddingTop) || 0;
     let w = Math.ceil(r.width), h = Math.ceil(r.height);
@@ -1830,6 +1831,24 @@ function layout() {
   resizeGame(LH_BASE * w / h);
 }
 const LW_MIN = 288, LH_BASE = 512;
+// iOS Home Screen apps can report a viewport shorter than the physical screen, leaving a black
+// "chin" at the bottom. When that happens, size the page to the real screen and let it overflow there.
+const STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+let fitKey = '';
+function fitStandalone() {   // measured once per orientation: enlarging the page changes what the viewport reports
+  if (!STANDALONE) return;
+  const portrait = matchMedia('(orientation: portrait)').matches, key = portrait ? 'p' : 'l';
+  if (key === fitKey) return;
+  fitKey = key;
+  const de = document.documentElement, mon = document.getElementById('monitor'), els = [de, document.body, mon];
+  for (const el of els) el.style.height = el.style.overflow = '';
+  mon.style.bottom = '';
+  const sw = window.screen.width, sh = window.screen.height, full = portrait ? Math.max(sw, sh) : Math.min(sw, sh);
+  if (full <= innerHeight + 1) return;
+  for (const el of els) el.style.height = full + 'px';
+  de.style.overflow = document.body.style.overflow = 'visible';
+  mon.style.bottom = 'auto'; scrollTo(0, 0);
+}
 window.setFullscreen = on => { fullscreen = on; document.body.classList.toggle('fs', on); layout(); };
 addEventListener('resize', layout); layout();
 if (TOUCH) {   // iOS reports the final size late after launch / rotation
