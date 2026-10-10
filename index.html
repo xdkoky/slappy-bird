@@ -43,29 +43,20 @@
   html.touch #bezel { padding:0; border-radius:0; background:none; box-shadow:none; }
   html.touch #screen { border-radius:0; box-shadow:none; }
   html.touch #label, html.touch #led { display:none; }
-  #namebox { display:none; position:fixed; inset:0; z-index:20; align-items:center; justify-content:center;
-    background:rgba(20,12,24,.6); touch-action:auto; }
-  #namebox form { background:#ded895; border:4px solid #543847; box-shadow:0 0 0 2px #fff8d8 inset, 4px 6px 0 rgba(28,16,40,.35);
-    padding:18px 18px 16px; width:min(300px, calc(100vw - 48px)); font:700 16px/1.2 Menlo, monospace; color:#543847; text-align:center; }
-  #namebox input { display:block; width:100%; box-sizing:border-box; margin:12px 0 14px; padding:10px; font:700 20px Menlo, monospace;
-    text-transform:uppercase; letter-spacing:2px; color:#543847; background:#fff8d8; border:3px solid #543847; border-radius:0; outline:none; }
-  #namebox button { font:700 15px Menlo, monospace; padding:9px 0; width:46%; border:3px solid #543847; color:#fff; background:#e86a17; }
-  #namebox button[value=cancel] { background:#b4a88c; }
-  #namebox .sub { margin-top:6px; font-size:12px; font-weight:400; color:#8a7438; }
-  #namebox .sub:empty { display:none; }
-  #namebox input::placeholder { color:#b8ac80; }
-  #namebox .msg { min-height:18px; margin:-6px 0 10px; font-size:13px; color:#c2310c; }
+  /* The name / room-code window is drawn in the game canvas; this invisible input sits exactly over the
+     drawn text field so tapping it opens the phone keyboard. */
+  #namebox { display:none; position:fixed; inset:0; z-index:20; pointer-events:none; }
+  #namebox input { position:absolute; pointer-events:auto; box-sizing:border-box; margin:0; padding:0 8px; border:0;
+    border-radius:0; outline:none; background:transparent; color:transparent; caret-color:transparent;
+    font-size:16px; text-transform:uppercase; -webkit-appearance:none; appearance:none; touch-action:auto; }
+  #namebox input::selection { background:transparent; }
 </style>
 </head>
 <body>
 <div id="safe"></div>
 <div id="statusbar"></div>
 <div id="namebox"><form>
-  <div class="ttl">YOUR NAME</div>
-  <div class="sub"></div>
   <input maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
-  <div class="msg"></div>
-  <button type="submit" value="ok">OK</button> <button type="button" value="cancel">CANCEL</button>
 </form></div>
 <div id="monitor">
   <div id="bezel">
@@ -2158,30 +2149,31 @@ function devName(nm, x, y, maxX) {
 }
 
 // Name entry: a real text field (so the phone keyboard works), styled to match the game.
-let nameBoxOpen = false, boxMode = 'name';
+let nameBoxOpen = false, boxMode = 'name', nbox = { title: '', sub: '', ph: '', msg: '', ok: 'OK', cancel: 'CANCEL', rect: null, field: null };
+const nameInput = () => document.querySelector('#namebox input');
 function openCodeBox() {
   if (nameBoxOpen) return;
   nameBoxOpen = true; boxMode = 'code'; sfx('blip', true);
-  const box = document.getElementById('namebox'), inp = box.querySelector('input');
-  box.querySelector('.ttl').textContent = 'ROOM CODE'; inp.maxLength = 4; inp.value = ''; nameMsg(''); box.style.display = 'flex';
+  const inp = nameInput();
+  Object.assign(nbox, { title: 'ROOM CODE', sub: 'ASK YOUR FRIEND FOR THE 4 LETTERS', ph: 'ABCD', msg: '', ok: 'JOIN', cancel: 'CANCEL' });
+  inp.maxLength = 4; inp.value = ''; document.getElementById('namebox').style.display = 'block';
   setTimeout(() => inp.focus(), 50);
 }
 function editName(welcome = false) {
   if (nameBoxOpen) return;
   nameBoxOpen = true; boxMode = welcome ? 'welcome' : 'name'; sfx('blip', true);
-  const box = document.getElementById('namebox'), inp = box.querySelector('input');
-  box.querySelector('.ttl').textContent = welcome ? 'PICK A NICKNAME' : 'YOUR NAME';
-  box.querySelector('.sub').textContent = welcome ? 'THIS IS HOW OTHER PLAYERS SEE YOU ON THE LEADERBOARD' : '';
-  box.querySelector('button[value=ok]').textContent = welcome ? 'SAVE' : 'OK';
-  box.querySelector('button[value=cancel]').textContent = welcome ? 'SKIP' : 'CANCEL';
-  inp.maxLength = 12; nameMsg('');
-  inp.value = welcome ? '' : player.name; inp.placeholder = welcome ? player.name : '';   // just tap and type
-  box.style.display = 'flex';
+  const inp = nameInput();
+  Object.assign(nbox, welcome
+    ? { title: 'PICK A NICKNAME', sub: 'THIS IS HOW OTHER PLAYERS SEE YOU ON THE LEADERBOARD', ph: player.name, ok: 'SAVE', cancel: 'SKIP', msg: '' }
+    : { title: 'YOUR NAME', sub: 'UP TO 12 LETTERS AND NUMBERS', ph: '', ok: 'OK', cancel: 'CANCEL', msg: '' });
+  inp.maxLength = 12;
+  inp.value = welcome ? '' : player.name;   // welcome: the random name is the placeholder, so just tap and type
+  document.getElementById('namebox').style.display = 'block';
   setTimeout(() => { inp.focus(); inp.select(); }, 50);
 }
-function nameMsg(t) { document.querySelector('#namebox .msg').textContent = t; }
+function nameMsg(t) { nbox.msg = t; }
 function closeNameBox(ok) {
-  const box = document.getElementById('namebox'), inp = box.querySelector('input');
+  const box = document.getElementById('namebox'), inp = nameInput();
   const done = () => { inp.blur(); box.style.display = 'none'; nameBoxOpen = false; nameMsg(''); };
   if (boxMode === 'code') {
     const code = inp.value.toUpperCase().replace(/[^A-Z]/g, '');
@@ -2201,6 +2193,46 @@ function closeNameBox(ok) {
       else { if (typeof stored === 'string' && stored) { player.name = stored; save(); } nameMsg('THAT NAME IS TAKEN'); sfx('blip', false); inp.focus(); inp.select(); }
     })
     .catch(() => { player.name = n; player.named = false; save(); lbFlush(); done(); });   // offline: try it later
+}
+
+// The window itself, in the game's own style. The text shown is what's in the hidden input.
+function drawNameBox() {
+  const inp = nameInput(), w = wide ? 380 : LW - 24, x = Math.round((LW - w) / 2);
+  const max = Math.floor((w - 28 + 2) / 12), subL = wrapText(nbox.sub, max);
+  const h = 150 + subL.length * 18;
+  const y = clamp(Math.round((Math.min(LH, 560) - h) / 2) - 40, 8, Math.max(8, LH - h - 8));
+  nbox.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text(nbox.title, LW / 2, y + 12, 2, '#fff', '#543847', 2);
+  let ly = y + 36;
+  for (const l of subL) { text(l, LW / 2, ly, 2, '#8a7438', '#000', 0); ly += 18; }
+  // the text field
+  const fx = x + 14, fw = w - 28, fy = ly + 8, fh = 34, focused = document.activeElement === inp;
+  nbox.field = { x: fx, y: fy, w: fw, h: fh };
+  uiShadow(fx, fy, fw, fh);
+  g.fillStyle = '#543847'; g.fillRect(fx, fy, fw, fh);
+  g.fillStyle = focused ? '#fff' : '#fff8d8'; g.fillRect(fx + 3, fy + 3, fw - 6, fh - 6);
+  g.fillStyle = '#e8dcb0'; g.fillRect(fx + 3, fy + 3, fw - 6, 2);                  // inset shading
+  const val = boxMode === 'code' ? inp.value.toUpperCase().replace(/[^A-Z]/g, '') : cleanName(inp.value);
+  const tx = fx + 10, ty = fy + 10;
+  if (val) text(val, tx, ty, 2, '#543847', '#000', 0, 'l');
+  else if (nbox.ph) text(nbox.ph, tx, ty, 2, '#c9b968', '#000', 0, 'l');
+  if (focused && (performance.now() / 500 | 0) % 2 === 0) { g.fillStyle = '#e86a17'; g.fillRect(tx + (val ? tw(val) + 2 : 0), ty - 2, 3, 18); }
+  if (!focused && !val) text('TAP TO TYPE', fx + fw - 10, ty, 2, '#c9b968', '#000', 0, 'r');
+  // message + buttons
+  if (nbox.msg) text(nbox.msg, LW / 2, fy + fh + 10, 2, nbox.msg === 'CHECKING...' ? '#8a7438' : '#c2310c', '#000', 0);
+  const bw = Math.round((w - 40) / 2), by = y + h - 44;
+  button(x + 14, by, bw, 30, nbox.cancel, () => closeNameBox(false), false);
+  button(x + w - 14 - bw, by, bw, 30, nbox.ok, () => closeNameBox(true));
+  placeNameInput();
+}
+function placeNameInput() {           // keep the invisible input exactly over the drawn field
+  const f = nbox.field, inp = nameInput(); if (!f) return;
+  const r = screen.getBoundingClientRect(), sx = r.width / LW, sy = r.height / (LH + TOP + OVER);
+  const css = { left: r.left + f.x * sx, top: r.top + (f.y + TOP) * sy, width: f.w * sx, height: f.h * sy };
+  for (const k in css) { const v = Math.round(css[k]) + 'px'; if (inp.style[k] !== v) inp.style[k] = v; }
 }
 
 function notesButton(y) {
@@ -2679,6 +2711,7 @@ function draw() {
   if (lb.open) drawLB();
   if (race.panel) drawRacePanel();
   if (a2hs.open) drawA2HS();
+  if (nameBoxOpen) drawNameBox();
   if (paused && resumeT) {
     const n = Math.ceil(resumeT / COUNT_STEP), t = COUNT_STEP - 1 - (resumeT - 1) % COUNT_STEP;   // t: 0..44 within each number
     const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
@@ -2950,7 +2983,7 @@ screen.addEventListener('pointerdown', e => {
   audioInit();
   const r = screen.getBoundingClientRect();
   const atEdge = visH - e.clientY < EDGE_PX;
-  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || notesPage >= 0)) {
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
@@ -2968,6 +3001,12 @@ screen.addEventListener('pointercancel', () => { heldTap = null; });
 document.addEventListener('visibilitychange', () => { heldTap = null; });
 function handleTap(cx, cy) {
   const r = screen.getBoundingClientRect(), x = (cx - r.left) / r.width * LW, y = (cy - r.top) / r.height * (LH + TOP + OVER) - TOP;
+  if (nameBoxOpen) {                  // the drawn window: its buttons, a tap outside cancels
+    const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
+    if (b) return pressButton(b);
+    const q = nbox.rect; if (q && (x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h)) closeNameBox(false);
+    return;
+  }
   if (TOUCH && paused) return setPaused(false);
   const b = buttons.find(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
   if (b) return pressButton(b);
@@ -3031,10 +3070,8 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 {
-  const box = document.getElementById('namebox'), form = box.querySelector('form');
-  form.addEventListener('submit', e => { e.preventDefault(); closeNameBox(true); });
-  form.querySelector('button[value=cancel]').addEventListener('click', () => closeNameBox(false));
-  box.addEventListener('pointerdown', e => { if (e.target === box) closeNameBox(false); });
+  const form = document.querySelector('#namebox form');
+  form.addEventListener('submit', e => { e.preventDefault(); closeNameBox(true); });   // keyboard Done / Enter
 }
 if (LB_ON) {
   // one-time: put the best score from before the leaderboard existed on the board
