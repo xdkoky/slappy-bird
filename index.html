@@ -649,6 +649,9 @@ const PIPE_PALS = {
   static: PIPE_COLS,
   move:   { k:'#543847', H:'#fff0b0', L:'#ffc05a', M:'#f08a24', D:'#b45a10' },
   chomp:  { k:'#543847', H:'#ffd0ec', L:'#f47cba', M:'#cc3e8c', D:'#86205a' },
+  tilt:   { k:'#543847', H:'#d8f8ff', L:'#7fd8f0', M:'#3aa8d0', D:'#1c6a90' },   // unlocked after boss 1
+  rock:   { k:'#543847', H:'#f0e0ff', L:'#c8a0f0', M:'#9a60d8', D:'#5c2c98' },   // after boss 2
+  split:  { k:'#543847', H:'#ffffff', L:'#d0d8e0', M:'#9aa6b4', D:'#5c6878' },   // after boss 3
 };
 const PIPE_BODY = 'kLHHLLMMMMMMMMMMMMDMDDDk', PIPE_CAP = 'kLHHHLLMMMMMMMMMMMMMDMDDDk';
 function drawPipe(px, y0, y1, capAtBottom, pal = PIPE_COLS, teeth = false) {
@@ -677,8 +680,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 10;
+const NOTES_VERSION = 11;
 const PATCH_NOTES = [
+  { title: 'NEW PIPES', items: [
+    { h: 'BEAT A BOSS', col: '#1c6a90', t: 'EVERY BOSS YOU BEAT UNLOCKS A NEW KIND OF PIPE. ANGLED PIPES COME FIRST.' },
+    { h: 'AND THEN...', col: '#5c2c98', t: 'KEEP GOING TO FIND OUT WHAT COMES NEXT!' },
+  ] },
   { title: 'FINISH LINES', items: [
     { h: 'BEAT YOUR BEST', col: '#e86a17', t: 'A FINISH LINE SHOWS WHERE YOUR BEST SCORE ENDS. FLY PAST IT FOR CONFETTI AND APPLAUSE.' },
     { h: 'BEAT THE WEEK', col: '#7a1898', t: 'A GOLD LINE MARKS THE WEEKLY TOP SCORE AND WHO SET IT. CAN YOU PASS THEM?' },
@@ -746,7 +753,7 @@ function reset() {
   overT = 0; newBest = false; popups = []; feathers = []; sparks = []; rings = []; booms = []; shots = []; fade = 1;
   spawned = 0; passedPipes = 0; nextBossAt = FIRST_BOSS; bossPending = false; boss = null; bossesBeaten = 0;
   hearts = 3; combo = 0; parries = 0; hitstop = 0; slowmo = 0; banner = null; shownMove = shownChomp = false;
-  coins = []; slot = null; rev = null; halo = 0; goals = []; confetti = []; flashes = [];
+  coins = []; slot = null; rev = null; halo = 0; goals = []; confetti = []; flashes = []; shownNew = {};
 }
 
 // ------------------------------------------------------------ finish lines
@@ -809,9 +816,12 @@ function drawGoals() {
     const x = Math.round((p.x + 20) / 2) * 2, y0 = Math.round(p.y0 / 2) * 2, y1 = Math.round(p.y1 / 2) * 2, sq = 6;
     const A = gl.kind === 'best' ? ['#ffffff', '#1a1020'] : ['#ffd23f', '#7a1898'];
     const ox = stack * 14;
-    g.fillStyle = 'rgba(26,16,32,0.6)'; g.fillRect(x - 2 + ox, y0, 2 * sq + 4, y1 - y0);
-    for (let y = y0; y < y1; y += sq) for (let c = 0; c < 2; c++) {
-      g.fillStyle = A[(((y - y0) / sq | 0) + c) & 1]; g.fillRect(x + ox + c * sq, y, sq, Math.min(sq, y1 - y));
+    const segs = p.kind === 'split' ? [[y0, Math.round(p.b0 / 2) * 2], [Math.round(p.b1 / 2) * 2, y1]] : [[y0, y1]];
+    for (const [s0, s1] of segs) {
+      g.fillStyle = 'rgba(26,16,32,0.6)'; g.fillRect(x - 2 + ox, s0, 2 * sq + 4, s1 - s0);
+      for (let y = s0; y < s1; y += sq) for (let c = 0; c < 2; c++) {
+        g.fillStyle = A[(((y - s0) / sq | 0) + c) & 1]; g.fillRect(x + ox + c * sq, y, sq, Math.min(sq, s1 - y));
+      }
     }
     // flag with the target: yours on the left of the line, the weekly one on the right, so they never collide
     const fy = gl.kind === 'best' ? y0 + 6 : y1 - 46, fx = x + ox + 2 * sq + 4;
@@ -905,6 +915,37 @@ function pipeShape(p) {
   if (p.kind === 'chomp') h -= p.amp * (0.5 + 0.5 * Math.sin(p.phase + p.t * p.freq));
   c = clamp(c, 50 + h, GY - 50 - h);
   p.y0 = c - h; p.y1 = c + h;
+  if (p.kind === 'rock') p.ang = p.amp * Math.sin(p.phase + p.t * p.freq);
+  if (p.kind === 'split') { p.b0 = c - p.bh / 2; p.b1 = c + p.bh / 2; }
+}
+
+// New pipe types, one unlocked per boss beaten, each introduced with a banner the first time.
+const NEW_KINDS = [
+  { kind: 'tilt',  banner: ['ANGLED PIPES!', 'MIND THE SLOPE'] },
+  { kind: 'rock',  banner: ['ROCKING PIPES!', 'TIME IT RIGHT'] },
+  { kind: 'split', banner: ['SPLIT PIPES!', 'PICK A LANE'] },
+];
+let shownNew = {};
+function newKind() {
+  const open = NEW_KINDS.slice(0, Math.min(bossesBeaten, NEW_KINDS.length));
+  const intro = open.find(n => !shownNew[n.kind]);
+  if (intro) {
+    if (banner) return null;                    // wait until the boss's victory banner is gone
+    shownNew[intro.kind] = true; setBanner(intro.banner[0], intro.banner[1]); sfx('swoosh');
+    return intro.kind;
+  }
+  return open.length && Math.random() < 0.16 + 0.06 * open.length ? open[Math.random() * open.length | 0].kind : null;
+}
+// Collision against a pipe pair, rotated for angled pipes (the bird is moved into the pipe's frame).
+function hitPipe(p) {
+  let bx = BIRD_X, by = bird.y;
+  if (p.ang) {
+    const cx = p.x + 24, cy = (p.y0 + p.y1) / 2, dx = bx - cx, dy = by - cy, c = Math.cos(p.ang), s = Math.sin(p.ang);
+    bx = cx + dx * c + dy * s; by = cy - dx * s + dy * c;
+  }
+  return circRect(bx, by, BIRD_R, p.x - 2, -800, 52, p.y0 + 800) ||
+         circRect(bx, by, BIRD_R, p.x - 2, p.y1, 52, GY + 400) ||
+         (p.kind === 'split' && circRect(bx, by, BIRD_R, p.x - 2, p.b0, 52, p.b1 - p.b0));
 }
 
 // Keep pipes queued to just past the right edge; stop at a boss threshold. Pipes that appear inside
@@ -920,10 +961,15 @@ function spawnPipes() {
     let r = Math.random(), kind = r < d.chomp ? 'chomp' : r < d.chomp + d.move ? 'move' : 'static';
     if (d.e >= 10 && !shownMove) { kind = 'move'; shownMove = true; setBanner('MOVING PIPES!', 'STAY SHARP'); sfx('swoosh'); }
     else if (d.e >= 25 && !shownChomp) { kind = 'chomp'; shownChomp = true; setBanner('CHOMPERS!', 'MIND THE TEETH'); sfx('swoosh'); }
+    const nk = state === 'play' ? newKind() : null;
+    if (nk) kind = nk;
     const prev = last;
     last = { x, top, gap: d.gap, kind, t: 0, passed: false, intro: x < LW ? -6 * n++ : INTRO,
       amp: kind === 'move' ? d.moveAmp : kind === 'chomp' ? d.chompAmp : 0,
-      freq: kind === 'move' ? rand(0.022, 0.04) : rand(0.045, 0.065), phase: rand(0, 6.28) };
+      freq: kind === 'move' ? rand(0.022, 0.04) : rand(0.045, 0.065), phase: rand(0, 6.28), ang: 0 };
+    if (kind === 'tilt') { last.ang = (Math.random() < 0.5 ? -1 : 1) * rand(0.16, 0.3); last.gap += 18; }
+    if (kind === 'rock') { last.amp = rand(0.2, 0.32); last.freq = rand(0.02, 0.032); last.gap += 22; }
+    if (kind === 'split') { last.bh = 48; last.gap = Math.round(d.gap * 0.86) * 2 + last.bh; last.lane = Math.random() < 0.5 ? 0 : 1; last.top = clamp(last.top, 50, GY - 50 - last.gap); }
     pipeShape(last); pipes.push(last); addCoins(last, prev, d);
   }
 }
@@ -964,7 +1010,7 @@ function updateCoins(sp) {
     } else if (!p) { if (state === 'play') c.x -= sp; }
     else {
       c.x = p.x + c.dx;
-      if (c.mode === 'mid') c.y = (p.y0 + p.y1) / 2 + c.dy;
+      if (c.mode === 'mid') c.y = (p.kind === 'split' ? (p.lane ? (p.b1 + p.y1) / 2 : (p.y0 + p.b0) / 2) : (p.y0 + p.y1) / 2) + c.dy;
       else if (c.mode === 'top') c.y = p.y0 + 12;
       else if (c.mode === 'bot') c.y = p.y1 - 12;
     }
@@ -1378,8 +1424,7 @@ function update() {
       p.x -= sp; p.intro++; p.t++; pipeShape(p);
       if (p.intro < INTRO) continue;
       if (!p.passed && p.x + 24 < BIRD_X) { p.passed = true; score++; passedPipes++; sfx('point'); }
-      if (circRect(BIRD_X, bird.y, BIRD_R, p.x - 2, -200, 52, p.y0 + 200) ||
-          circRect(BIRD_X, bird.y, BIRD_R, p.x - 2, p.y1, 52, GY)) { crash(false); break; }
+      if (hitPipe(p)) { crash(false); break; }
     }
     pipes = pipes.filter(p => p.x > -60);
   }
@@ -2157,8 +2202,19 @@ function draw() {
     if (t <= 0) continue;
     const up = Math.round((1 - e) * (p.y0 + 40) / 2) * 2, dn = Math.round((1 - e) * (GY - p.y1 + 40) / 2) * 2;
     const pal = PIPE_PALS[p.kind], teeth = p.kind === 'chomp';
-    drawPipe(x, -10 - up, Math.round(p.y0 / 2) * 2 - up, true, pal, teeth);
-    drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + dn, false, pal, teeth);
+    if (p.ang) {                                   // angled pipes lean around the middle of their gap
+      const cx = x + 24, cy = (p.y0 + p.y1) / 2;
+      g.save(); g.translate(cx, cy); g.rotate(p.ang); g.translate(-cx, -cy);
+    }
+    drawPipe(x, (p.ang ? -420 : -10) - up, Math.round(p.y0 / 2) * 2 - up, true, pal, teeth);
+    drawPipe(x, Math.round(p.y1 / 2) * 2 + dn, GY + (p.ang ? 300 : 0) + dn, false, pal, teeth);
+    if (p.kind === 'split' && e > 0.5) {           // the floating block between the two lanes
+      g.globalAlpha = Math.min(1, (e - 0.5) * 2);
+      const b0 = Math.round(p.b0 / 2) * 2, b1 = Math.round(p.b1 / 2) * 2;
+      drawPipe(x, b0, b1, true, pal); drawPipe(x, b0, b0 + 24, false, pal);
+      g.globalAlpha = 1;
+    }
+    if (p.ang) g.restore();
   }
   drawGoals();
   g.restore();
