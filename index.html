@@ -380,6 +380,32 @@ function text(str, x, y, sc = 2, fill = '#fff', ol = '#543847', olw = 2, align =
   g.drawImage(c, Math.round(dx), Math.round(y));
 }
 
+// Big title lettering: two-tone fill, dark outline, white outer outline and a soft drop shadow.
+const bcache = new Map();
+function bannerImg(str, sc, fill, shade) {
+  const key = [str, sc, fill, shade].join('|'); let c = bcache.get(key); if (c) return c;
+  const r1 = sc >= 8 ? 4 : 2, r2 = r1 + (sc >= 5 ? 4 : 2), pad = r2 + 2, cw = 6 * sc;
+  c = document.createElement('canvas'); c.width = str.length * cw - sc + pad * 2; c.height = 7 * sc + pad * 2 + 2;
+  const x = c.getContext('2d');
+  const paint = (r, dy, col, rowCol) => {
+    for (let i = 0; i < str.length; i++) {
+      const gl = FONT[str[i]]; if (!gl) continue;
+      for (let row = 0; row < 7; row++) for (let b = 0; b < 5; b++) if ((gl[row] >> (4 - b)) & 1) {
+        x.fillStyle = rowCol ? rowCol(row) : col;
+        x.fillRect(pad + i * cw + b * sc - r, pad + row * sc - r + dy, sc + r * 2, sc + r * 2);
+      }
+    }
+  };
+  x.globalAlpha = 0.3; paint(r2, 2, '#2a1830'); x.globalAlpha = 1;   // shadow
+  paint(r2, 0, '#fff'); paint(r1, 0, '#543847');
+  paint(0, 0, null, row => row >= 5 ? shade : fill);
+  bcache.set(key, c); return c;
+}
+function bigText(str, x, y, sc, fill = '#fcb800', shade = '#e07800') {
+  const c = bannerImg(String(str).toUpperCase(), sc, fill, shade);
+  g.drawImage(c, Math.round(x - c.width / 2), Math.round(y - 4));
+}
+
 // ============================================================ sprites (1 art px = 2 logical px)
 const C = { k:'#543847', y:'#f8d81c', Y:'#fdf08a', o:'#f2a72e', w:'#ffffff', v:'#f8f4e0', r:'#f85a1c', R:'#e0401a' };
 function sprite(rows, pal = C) {
@@ -577,8 +603,11 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 5;
+const NOTES_VERSION = 6;
 const PATCH_NOTES = [
+  { title: 'NEW LOOK', items: [
+    { h: 'FRESH PAINT', col: '#e86a17', t: 'BOLD NEW TITLES AND ORANGE BUTTONS. A TAP GUIDE ON THE TITLE SCREEN SHOWS HOW TO FLAP.' },
+  ] },
   { title: 'PAUSE', items: [
     { h: '3 2 1 GO!', col: '#c2310c', t: 'AFTER A PAUSE A COUNTDOWN GIVES YOU TIME TO GET READY BEFORE THE GAME GOES ON.' },
   ] },
@@ -1297,16 +1326,58 @@ function wideControls() {
 
 // Touch buttons are drawn into the game canvas; taps are hit-tested against the rects collected each frame.
 let buttons = [];
+// Orange button with a white rim (greyed out when off).
 function button(x, y, w, h, label, act, on = true) {
-  g.fillStyle = '#543847'; g.fillRect(x, y, w, h);
-  g.fillStyle = '#c9b968'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
-  g.fillStyle = on ? '#fff8d8' : '#d8cfa8'; g.fillRect(x + 2, y + 2, w - 4, h - 7);
-  if (label) text(label, x + w / 2, y + (h - 17) / 2, 2, on ? '#543847' : '#8a7438', '#000', 0);
+  const R = (rx, ry, rw, rh, c) => { g.fillStyle = c; g.fillRect(rx, ry, rw, rh); };
+  R(x, y, w, h, '#543847'); R(x + 2, y + 2, w - 4, h - 4, '#fff');
+  R(x + 4, y + 4, w - 8, h - 8, on ? '#e86a17' : '#b4a88c');
+  R(x + 4, y + 4, w - 8, 2, on ? '#f8a050' : '#cdc3aa');            // top highlight
+  R(x + 4, y + h - 8, w - 8, 4, on ? '#c24e0a' : '#968a70');        // bottom shade
+  if (label) {
+    const ly = Math.round(y + (h - 14) / 2) - 1;
+    text(label, x + w / 2, ly + 2, 2, on ? '#8a3006' : '#706650', '#000', 0);
+    text(label, x + w / 2, ly, 2, on ? '#fff' : '#ece4d0', '#000', 0);
+  }
   buttons.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, act });
 }
 function pauseButton(x, y) {
   button(x, y, 30, 32, '', () => setPaused(true));
-  g.fillStyle = '#543847'; g.fillRect(x + 9, y + 8, 4, 13); g.fillRect(x + 17, y + 8, 4, 13);
+  g.fillStyle = '#8a3006'; g.fillRect(x + 10, y + 10, 4, 12); g.fillRect(x + 18, y + 10, 4, 12);
+  g.fillStyle = '#fff'; g.fillRect(x + 9, y + 9, 4, 12); g.fillRect(x + 17, y + 9, 4, 12);
+}
+// "TAP" tutorial for the title screen: ghost bird flapping up, arrow, tapping hand and a red tag.
+const GHOST = { k:'#7c7c8c', y:'#d8dce4', Y:'#eef0f4', o:'#c2c6d0', w:'#ffffff', v:'#f4f4f6', r:'#b4b8c2', R:'#a4a8b2' };
+const ghostBird = (() => { const c = sprite(BIRD, GHOST); c.getContext('2d').drawImage(sprite(WING, GHOST), 0, 3); return c; })();
+const HAND = sprite([
+  '...kk.....',
+  '..kwwk....',
+  '..kwwk....',
+  '..kwwkkk..',
+  '..kwwkwwkk.',
+  'kk.kwwkwwkwk',
+  'kwkkwwwwwwwk',
+  'kwwkwwwwwwwk',
+  '.kwwwwwwwwk.',
+  '..kwwwwwwk..',
+  '...kwwwwk...',
+  '...kkkkkk...',
+]);
+const ARROW = sprite(['..k..', '.kkk.', 'kkkkk', '.kkk.', '.kkk.']);
+function tapHint(cx, y) {
+  const up = (tick / 30 | 0) % 2 === 0, bob = up ? -4 : 0;
+  g.drawImage(ghostBird, cx - 18, y + bob, 36, 24);
+  if (up) { g.fillStyle = '#7c7c8c'; g.fillRect(cx - 28, y + 22, 6, 2); g.fillRect(cx - 24, y + 28, 6, 2); }
+  g.drawImage(ARROW, cx - 5, y + 34, 10, 10);
+  const hy = y + 54 + (up ? 2 : 0);
+  if (up) { g.fillStyle = '#543847'; g.fillRect(cx - 12, hy - 8, 2, 6); g.fillRect(cx - 4, hy - 10, 2, 6); g.fillRect(cx + 4, hy - 8, 2, 6); }
+  g.drawImage(HAND, cx - 10, hy, 24, 24);
+  // red tag pointing at the hand
+  const tx = cx + 22, ty = y + 56, tw2 = 48, th = 22;
+  const R = (x, yy, w, h, c) => { g.fillStyle = c; g.fillRect(x, yy, w, h); };
+  for (let i = 0; i < 6; i++) { R(tx - 12 + i * 2, ty + 10 - i * 2, 2, 2 + i * 4, '#fff'); }
+  R(tx, ty, tw2, th, '#fff'); R(tx + 2, ty + 2, tw2 - 4, th - 4, '#e8302a');
+  for (let i = 0; i < 5; i++) R(tx - 8 + i * 2, ty + 10 - i * 2 + 1, 2, i * 4, '#e8302a');
+  text(ACT, tx + tw2 / 2, ty + 4, 2, '#fff', '#000', 0);
 }
 function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.8; save(); if (!muted) sfx('blip', true); }
 function toggleCrt() { crtOn = !crtOn; save(); sfx('blip', crtOn); }
@@ -1401,10 +1472,11 @@ function drawCompactHUD() {
   if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
   if (state === 'ready') {
-    text('SLAPPY', LW / 2, 64, 6, '#ffd23f', '#543847', 4);
-    text('BIRD', LW / 2, 118, 6, '#ffd23f', '#543847', 4);
-    text('GET READY!', LW / 2, 178, 4, '#7fe05a', '#1f5410', 2);
-    if ((tick / 24 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLAP' : 'SLAP YOUR MAC TO FLAP', LW / 2, 300, TOUCH ? 3 : 2, '#fff', '#543847');
+    bigText('SLAPPY', LW / 2, 64, 6, '#ffd23f', '#f0a020');
+    bigText('BIRD', LW / 2, 118, 6, '#ffd23f', '#f0a020');
+    bigText('GET READY!', LW / 2, 180, 4);
+    if (TOUCH) tapHint(LW / 2 + 36, 226);
+    else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
     notesButton(340);
     if (TOUCH) { settingsButton(420); text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0); }
     else {
@@ -1415,7 +1487,7 @@ function drawCompactHUD() {
     }
   }
   if (state === 'over') {
-    text('GAME OVER', LW / 2, Math.min(110, -40 + overT * 10), 4, '#fca048', '#543847', 4);
+    bigText('GAME OVER', LW / 2, Math.min(110, -40 + overT * 10), 4);
     if (overT > 18) drawScoreboard(LW / 2, Math.max(176, 520 - (overT - 18) * 24), 226);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
@@ -1433,14 +1505,15 @@ function drawWideHUD() {
     chip(28, 96, tw(String(tokens)) + 46, 30); counter(tokenSmall, tokens, tokenBump, 40, 104, 'l', true);
   }
   if (state === 'ready') {
-    text('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#543847', 4);
-    text('GET READY!', LW / 2, 150, 4, '#7fe05a', '#1f5410', 2);
-    if ((tick / 24 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLAP' : 'SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
+    bigText('SLAPPY BIRD', LW / 2, 78, 7, '#ffd23f', '#f0a020');
+    bigText('GET READY!', LW / 2, 154, 4);
+    if (TOUCH) tapHint(BIRD_X + 110, 220);
+    else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
     notesButton(344);
     wideControls();
   }
   if (state === 'over') {
-    text('GAME OVER', LW / 2, Math.min(70, -60 + overT * 10), 6, '#fca048', '#543847', 4);
+    bigText('GAME OVER', LW / 2, Math.min(70, -60 + overT * 10), 6);
     if (overT > 18) drawScoreboard(LW / 2, Math.max(150, 520 - (overT - 18) * 24), 300);
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 296, 3, '#fff', '#543847', 2);
@@ -1744,12 +1817,12 @@ function draw() {
     const big = wide ? 14 : 12, sc = t < 6 ? big + 6 - t : big;                                  // pops in, then settles
     g.fillStyle = `rgba(20,12,24,${0.15 + 0.1 * n})`; cover();
     g.globalAlpha = t > COUNT_STEP - 10 ? (COUNT_STEP - t) / 10 : 1;
-    text(n, LW / 2, 200 - sc * 3.5, sc, '#ffd23f', '#543847', sc > big ? 6 : 4);
+    bigText(n, LW / 2, 200 - sc * 3.5, sc);
     g.globalAlpha = 1;
-    text('GET READY!', LW / 2, 270, 3, '#7fe05a', '#1f5410', 2);
+    bigText('GET READY!', LW / 2, 274, 3);
   } else if (paused) {
     g.fillStyle = 'rgba(20,12,24,0.45)'; cover();
-    text('PAUSED', LW / 2, 190, wide ? 6 : 5, '#fff', '#543847', 4);
+    bigText('PAUSED', LW / 2, 190, wide ? 6 : 5);
     if ((performance.now() / 400 | 0) % 2 === 0) text(TOUCH ? 'TAP TO RESUME' : 'SLAP OR SPACE TO RESUME', LW / 2, 260, 2, '#fff', '#543847');
   }
   g.restore();
