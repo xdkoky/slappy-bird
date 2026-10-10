@@ -106,12 +106,13 @@ const player = {
   name: cleanName(SAVED.pname || idStore.pname || window.PLAYER_NAME) || randomName(),
   pending: Math.max(SAVED.pend | 0, idStore.pend | 0),   // best score not yet uploaded (offline)
   named: (SAVED.pnamed ?? idStore.pnamed) !== false,     // false = renamed, server doesn't know yet
+  bestSynced: !!(SAVED.pbsync || idStore.pbsync),        // has the best from before the leaderboard been uploaded?
 };
 
 function save() {
   const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens,
-    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named };
-  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed })); } catch {}
+    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced };
+  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync })); } catch {}
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -2372,7 +2373,11 @@ function loop(now) {
   form.querySelector('button[value=cancel]').addEventListener('click', () => closeNameBox(false));
   box.addEventListener('pointerdown', e => { if (e.target === box) closeNameBox(false); });
 }
-if (LB_ON) { lbFlush(); addEventListener('online', lbFlush); }
+if (LB_ON) {
+  // one-time: put the best score from before the leaderboard existed on the board
+  if (!player.bestSynced) { player.bestSynced = true; if (best > 0) player.pending = Math.max(player.pending, best); save(); }
+  lbFlush(); addEventListener('online', lbFlush);
+}
 reset(); fade = 0;
 requestAnimationFrame(loop);
 </script>
