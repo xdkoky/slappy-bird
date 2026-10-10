@@ -22,5 +22,5 @@ jobs:
           key=$(sed -n "s/^const LB_KEY = '\(.*\)';.*/\1/p" index.html)
           if [ -z "$url" ] || [ -z "$key" ]; then echo "Leaderboard not configured yet, skipping."; exit 0; fi
           curl -fsS -X POST "${url%/}/rest/v1/rpc/leaderboard" \
-            -H "apikey: $key" -H "Authorization: Bearer $key" -H "Content-Type: application/json" \
+            -H "apikey: $key" -H "Content-Type: application/json" \
             -d '{"p_kind":"all"}' -o /dev/null -w "HTTP %{http_code}\n"

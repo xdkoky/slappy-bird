@@ -84,10 +84,10 @@ try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('s
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
 let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot tokens carry over between runs
 // ============================================================ online leaderboard config
-// Fill in from Supabase: Project Settings -> API (Project URL + "anon public" key). Both are meant to be
+// Fill in from Supabase: Project URL + publishable (or legacy "anon public") key. Both are meant to be
 // public. Leave empty and the leaderboard stays hidden. Database setup: supabase/leaderboard.sql
 const LB_URL = '';
-const LB_KEY = '';
+const LB_KEY = 'sb_publishable_t2YZwsQqYSFnd-7yxd1Skw_UZChZedm';
 const LB_ON = !!(LB_URL && LB_KEY);
 // This device's player: a random id + secret (proves the row is ours) and a display name.
 // Web pages can't see the device or Game Center name, so the default is a random bird name.
@@ -1504,7 +1504,7 @@ const lb = { open: false, tab: 'week', rect: null, data: { week: null, all: null
 function lbCall(fn, body) {
   return fetch(LB_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
     method: 'POST', body: JSON.stringify(body),
-    headers: { apikey: LB_KEY, Authorization: 'Bearer ' + LB_KEY, 'Content-Type': 'application/json' },
+    headers: { apikey: LB_KEY, 'Content-Type': 'application/json' },   // apikey only: works for sb_publishable_ and legacy anon keys
   }).then(r => r.ok ? r.text().then(t => t ? JSON.parse(t) : null) : Promise.reject(r.status));
 }
 let lbSending = false, lbRetry = 4000;
