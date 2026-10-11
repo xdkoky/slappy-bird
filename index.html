@@ -81,10 +81,17 @@ try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('s
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
 let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot tokens carry over between runs
 // lifetime stats for the skin challenges, unlocked / equipped skins
-const STATS0 = { runs: 0, pipes: 0, coins: 0, tokens: 0, parries: 0, bosses: 0, maxBossRun: 0, revives: 0, racesWon: 0, skins: ['classic'], skin: 'classic', fresh: 0, devSeen: false };
+const STATS0 = { runs: 0, pipes: 0, coins: 0, tokens: 0, parries: 0, bosses: 0, maxBossRun: 0, revives: 0, racesWon: 0, skins: ['rookie'], skin: 'rookie', fresh: 0, devSeen: false };
 let stats = Object.assign({}, STATS0);
 try { Object.assign(stats, window.SAVED && SAVED.stats || JSON.parse(localStorage.getItem('slappy-stats') || 'null') || SAVED.stats || {}); } catch {}
-if (!Array.isArray(stats.skins)) stats.skins = ['classic'];
+if (!Array.isArray(stats.skins)) stats.skins = ['rookie'];
+// v2: the yellow bird stopped being the default; it's now a secret skin (CLASSIC). Everyone starts as ROOKIE.
+if (!stats.v2) {
+  stats.v2 = true;
+  if (!stats.skins.includes('rookie')) stats.skins.unshift('rookie');
+  if (!stats.egg) stats.skins = stats.skins.filter(id => id !== 'classic');
+  if (stats.skin === 'classic' && !stats.egg) stats.skin = 'rookie';
+}
 
 // ============================================================ online leaderboard config
 // Fill in from Supabase: Project URL + publishable (or legacy "anon public") key. Both are meant to be
@@ -616,7 +623,8 @@ const birdWhite = silhouette(birdFrames[1]);
 const hash2 = (x, y) => { let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return ((h ^ (h >> 16)) >>> 0) / 4294967296; };
 const camo = cols => (x, y) => cols[Math.floor(hash2(Math.floor((x + (y % 2)) / 3), Math.floor(y / 2)) * cols.length)];
 const SKINS = [
-  { id: 'classic',  name: 'CLASSIC',       tier: 'base', pal: {}, how: 'THE ORIGINAL', need: () => true },
+  { id: 'rookie',   name: 'ROOKIE',        tier: 'base', pal: { k: '#3a3a40', y: '#8e8a80', Y: '#a8a498', o: '#747068', v: '#c4c0b4', w: '#e4e0d4', r: '#8a7a62', R: '#6a5c4a' },
+    pat: (x, y, ch) => ch !== 'o' && hash2(x, y) > 0.9 ? '#7a766c' : null, how: 'EVERYONE STARTS HERE. EARN BETTER ONES!', need: () => true },
   { id: 'cardinal', name: 'CARDINAL',      tier: 'base', pal: { y: '#e8302a', Y: '#ff8070', o: '#ffb48a', v: '#ffe8e0', r: '#ffc21c', R: '#e08a10' }, how: 'SCORE 10 IN ONE RUN', need: () => [best, 10] },
   { id: 'bluebird', name: 'BLUEBIRD',      tier: 'base', pal: { y: '#3a8ef0', Y: '#90c8ff', o: '#f4d4a0', v: '#e8f4ff', r: '#ff9a30', R: '#d86a10' }, how: 'PLAY 10 RUNS', need: () => [stats.runs, 10] },
   { id: 'lime',     name: 'LIME',          tier: 'base', pal: { y: '#7ad83a', Y: '#cdf880', o: '#f8f0a0' }, how: 'COLLECT 100 COINS', need: () => [stats.coins, 100] },
@@ -633,7 +641,7 @@ const SKINS = [
   { id: 'racer',    name: 'RACER',         tier: 'base', pal: { r: '#f83850', R: '#b01830' }, pat: (x, y, ch) => ch === 'o' ? '#f83850' : (((x >> 1) + (y >> 1)) & 1 ? '#1a1a1a' : '#f4f4f4'), how: 'WIN A 1V1 RACE', need: () => [stats.racesWon, 1], race: true },
   // mastery: in order, each with several requirements
   { id: 'gold',     name: 'GOLD',          tier: 'gold', pal: { k: '#6a4808', y: '#f8c81c', Y: '#fff4a0', o: '#d8a010', v: '#fff0b0', r: '#fff4a0', R: '#d8a010' }, sheen: '#fffbe0',
-    reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON));
+    reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'rookie' && (!k.race || RACE_ON));
       return [['ALL ' + base.length + ' SKINS ABOVE', base.filter(k => hasSkin(k.id)).length, base.length], ['BEAT EVERY BOSS', (stats.bossTypes || []).length, 1 + BOSSES.length]]; } },
   { id: 'platinum', name: 'PLATINUM',      tier: 'plat', pal: { k: '#4a5068', y: '#d4dae8', Y: '#ffffff', o: '#a8b0c8', v: '#ffffff', r: '#c0c8d8', R: '#8890a8' }, sheen: '#ffffff', after: 'gold',
     reqs: () => [['SCORE 75 IN A RUN', best, 75], ['PARRY 50 FIREBALLS', stats.parries, 50]] },
@@ -643,6 +651,8 @@ const SKINS = [
   { id: 'darkmatter', name: 'DARK MATTER', tier: 'dark', pal: { k: '#0a0414', o: '#3a1060', v: '#c080ff', w: '#f0d0ff', r: '#b040e0', R: '#6a20a0' }, glow: [0.85, 0.15, 1], after: 'diamond', sparkle: '#e0a0ff',
     pat: (x, y, ch, t) => { if (hash2(x * 3, y + (t >> 3)) > 0.965) return '#ffffff'; const n = Math.sin(x * 0.9 + t * 0.08) + Math.cos(y * 1.1 - t * 0.06) + Math.sin((x + y) * 0.5 + t * 0.05); return ['#12061e', '#2a0c48', '#4c1880', '#8030c8', '#c060ff'][clamp(Math.floor(n + 2.2), 0, 4)]; },
     reqs: () => [['SCORE 150 IN A RUN', best, 150], ['6 BOSSES IN ONE RUN', stats.maxBossRun, 6], ['HIT 3 JACKPOTS', stats.revives, 3]] },
+  { id: 'classic',  name: 'CLASSIC',       tier: 'secret', pal: {}, hint: 'THE YEAR IT ALL STARTED. THE GROUND.',
+    reqs: () => [['FIND THE SECRET', stats.egg ? 1 : 0, 1]] },
   { id: 'dev',      name: 'DEV',           tier: 'dev', pal: { k: '#1a0a20', w: '#ffffff', v: '#ffffff' }, glow: [1, 0.3, 0.75], sparkle: '#ffd0f0',
     pat: (x, y, ch, t) => `hsl(${(x * 18 + y * 9 + t * 5) % 360},100%,${ch === 'o' ? 70 : ch === 'Y' ? 66 : 55}%)`,
     reqs: () => [['ONLY THE DEV HAS THIS ONE', player.isDev ? 1 : 0, 1]] },
@@ -674,7 +684,7 @@ const skinReqs = k => {
   const r = k.need(); return [[k.how, ...(Array.isArray(r) ? r : [r ? 1 : 0, 1])]];
 };
 const skinReady = k => (!k.after || hasSkin(k.after)) && skinReqs(k).every(([, a, b]) => a >= b);
-const equipped = () => skinById(hasSkin(stats.skin) ? stats.skin : 'classic');
+const equipped = () => skinById(hasSkin(stats.skin) ? stats.skin : 'rookie');
 let statsDirty = false, toasts = [];
 function statAdd(key, n = 1) { if (raceOn() && key !== 'racesWon') return; stats[key] = (stats[key] || 0) + n; statsDirty = true; }
 function checkSkins(silent) {
@@ -795,8 +805,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 13;
+const NOTES_VERSION = 14;
 const PATCH_NOTES = [
+  { title: 'NEW BIRD', items: [
+    { h: 'MEET ROOKIE', col: '#6a5c4a', t: 'EVERYONE NOW STARTS AS A PLAIN GREY BIRD. DO CHALLENGES TO EARN BETTER SKINS!' },
+    { h: 'WHERE IS YELLOW?', col: '#c8860c', t: 'THE YELLOW BIRD IS NOW A SECRET SKIN. CHECK SKINS FOR A HINT...' },
+  ] },
   { title: 'SKINS', items: [
     { h: 'EARN NEW LOOKS', col: '#e86a17', t: 'TAP SKINS TO SEE 13 SKINS. EACH ONE UNLOCKS WITH A CHALLENGE.' },
     { h: 'THE GRIND', col: '#c8860c', t: 'GET THEM ALL AND BEAT EVERY BOSS FOR GOLD. THEN PLATINUM, DIAMOND AND DARK MATTER. GOOD LUCK!' },
@@ -1019,6 +1033,8 @@ function flap(src) {
 }
 
 function crash(onGround) {
+  // easter egg: nose-dive straight into the ground with exactly 14 points (2014...)
+  if (onGround && score === 14 && !raceOn() && !stats.egg) { stats.egg = true; statsDirty = true; }
   sfx('hit'); flash = 1; shake = 7;
   for (const s of shots) s.dead = true;
   if (score > best && !raceOn()) { best = score; newBest = true; save(); }
@@ -1633,7 +1649,7 @@ function drawMedal(cx, cy) {
   pcircle(cx, cy, 24, '#543847');
   if (!m) { pcircle(cx, cy, 22, '#e8e2b0'); pcircle(cx, cy, 18, '#d6cf94'); return; }
   pcircle(cx, cy, 22, m[2]); pcircle(cx, cy, 20, m[0]); pcircle(cx, cy, 14, m[1]); pcircle(cx + 2, cy + 2, 10, m[0]);
-  g.drawImage(birdFrames[1], cx - 9, cy - 6, 18, 12);
+  g.drawImage(skinFrame(equipped().id, 1), cx - 9, cy - 6, 18, 12);
   const sp = [[-14, -14], [12, -12], [14, 10], [-12, 12]][(tick / 10 | 0) % 4], tw = (tick % 10) < 5 ? 2 : 4;
   g.fillStyle = '#fff'; g.fillRect(cx + sp[0] - tw, cy + sp[1], tw * 2 + 2, 2); g.fillRect(cx + sp[0], cy + sp[1] - tw, 2, tw * 2 + 2);
 }
@@ -1760,7 +1776,7 @@ function pauseButton(x, y) {
   g.fillStyle = '#fff'; g.fillRect(x + 9, y + 9 + dy, 4, 12); g.fillRect(x + 17, y + 9 + dy, 4, 12);
 }
 // "TAP" tutorial for the title screen: ghost bird flapping up, arrow, tapping hand and a red tag.
-const GHOST = { k:'#7c7c8c', y:'#d8dce4', Y:'#eef0f4', o:'#c2c6d0', w:'#ffffff', v:'#f4f4f6', r:'#b4b8c2', R:'#a4a8b2' };
+const GHOST = { k:'#ffffff', y:'#e8f8ff', Y:'#ffffff', o:'#d8f0ff', w:'#ffffff', v:'#ffffff', r:'#e8f8ff', R:'#d8f0ff' };
 const ghostBird = (() => { const c = sprite(BIRD, GHOST); c.getContext('2d').drawImage(sprite(WING, GHOST), 0, 3); return c; })();
 const HAND = sprite([
   '...kk.....',
@@ -1779,7 +1795,7 @@ const HAND = sprite([
 const ARROW = sprite(['..k..', '.kkk.', 'kkkkk', '.kkk.', '.kkk.']);
 function tapHint(cx, y) {
   const up = (tick / 30 | 0) % 2 === 0, bob = up ? -4 : 0;
-  g.drawImage(ghostBird, cx - 18, y + bob, 36, 24);
+  g.globalAlpha = 0.55; g.drawImage(ghostBird, cx - 18, y + bob, 36, 24); g.globalAlpha = 1;
   if (up) { g.fillStyle = '#7c7c8c'; g.fillRect(cx - 28, y + 22, 6, 2); g.fillRect(cx - 24, y + 28, 6, 2); }
   g.drawImage(ARROW, cx - 5, y + 34, 10, 10);
   const hy = y + 54 + (up ? 2 : 0);
@@ -2128,7 +2144,7 @@ const openNotes = () => { notesPage = 0; sfx('blip', true); };
 const skinsUI = { open: false, sel: null, rect: null };
 function openSkins() { if (!settingsAllowed()) return; skinsUI.open = true; skinsUI.sel = equipped().id; stats.fresh = 0; saveStats(); notesPage = -1; sfx('blip', true); }
 function closeSkins() { skinsUI.open = false; sfx('blip', false); }
-const TIER_COL = { base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
+const TIER_COL = { secret: '#ffd23f', base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
 function drawSkins() {
   const list = SKINS.filter(k => !k.race || RACE_ON);
   const cols = wide ? 6 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
@@ -2160,19 +2176,23 @@ function drawSkins() {
     buttons.push({ x: cx, y: cy, w: cw, h: ch, act: () => { skinsUI.sel = k.id; sfx('blip', true); } });
   });
   // details of the selected skin
-  const k = skinById(skinsUI.sel || 'classic'), have = hasSkin(k.id), dy = gy + rows * ch + 8;
+  const k = skinById(skinsUI.sel || 'rookie'), have = hasSkin(k.id), dy = gy + rows * ch + 8;
   g.fillStyle = '#c9b968'; g.fillRect(x + 10, dy - 4, w - 20, 2);
-  text(k.name, x + 14, dy + 4, 2, k.tier === 'base' ? '#543847' : TIER_COL[k.tier] === '#c8d0e0' ? '#6a7290' : TIER_COL[k.tier], '#000', 0, 'l');
-  const tierName = { base: '', gold: 'MASTERY', plat: 'MASTERY', diamond: 'MASTERY', dark: 'MASTERY', dev: 'SECRET' }[k.tier];
+  const hidden = k.tier === 'secret' && !have;
+  text(hidden ? '???' : k.name, x + 14, dy + 4, 2, k.tier === 'base' ? '#543847' : TIER_COL[k.tier] === '#c8d0e0' ? '#6a7290' : k.tier === 'secret' ? '#c8860c' : TIER_COL[k.tier], '#000', 0, 'l');
+  const tierName = { base: '', gold: 'MASTERY', plat: 'MASTERY', diamond: 'MASTERY', dark: 'MASTERY', dev: 'DEV ONLY', secret: 'SECRET' }[k.tier];
   if (tierName) text(tierName, x + w - 14, dy + 4, 2, '#8a7438', '#000', 0, 'r');
   let ly = dy + 26;
   const locked = k.after && !hasSkin(k.after);
   if (locked) { text('NEEDS ' + skinById(k.after).name + ' FIRST', x + 14, ly, 2, '#c2310c', '#000', 0, 'l'); ly += 22; }
   const maxc = Math.floor((w - 28 + 2) / 12);
+  if (k.tier === 'secret') {                      // no progress for a secret, just a riddle
+    for (const l of wrapText(have ? 'YOU FOUND IT. THE ORIGINAL.' : 'HINT: ' + k.hint, maxc)) { text(l, x + 14, ly, 2, have ? '#1f7a30' : '#8a7438', '#000', 0, 'l'); ly += 18; }
+  } else
   for (const [label, a, b] of skinReqs(k)) {      // label, then a bar with the count beside it
     const done = have || a >= b;
     for (const l of wrapText(label, maxc)) { text(l, x + 14, ly, 2, done ? '#1f7a30' : '#8a7438', '#000', 0, 'l'); ly += 18; }
-    if (k.tier !== 'dev') {
+    if (k.tier !== 'dev' && k.id !== 'rookie') {
       const cnt = done ? 'DONE' : Math.min(a, b) + '/' + b, bw = w - 28 - tw(cnt) - 10, pk = done ? 1 : clamp(a / b, 0, 1);
       g.fillStyle = '#543847'; g.fillRect(x + 14, ly + 2, bw, 8); g.fillStyle = '#e8dcb0'; g.fillRect(x + 16, ly + 4, bw - 4, 4);
       g.fillStyle = done ? '#7fe05a' : '#e86a17'; g.fillRect(x + 16, ly + 4, Math.round((bw - 4) * pk), 4);
@@ -2248,7 +2268,7 @@ function a2hsIcon(kind, cx, cy) {
   } else if (kind === 'app') {                      // a mini app icon, drawn from the game's own sprites
     R(-30, -30, 60, 60, '#543847'); R(-28, -28, 56, 56, '#4ec0ca');
     R(-28, 6, 56, 10, '#9ce659'); R(-28, 16, 56, 12, '#ded895'); R(-28, 6, 56, 2, '#543847');
-    g.save(); g.translate(cx, cy - 6); g.rotate(-0.4); g.drawImage(birdFrames[1], -18, -12, 36, 24); g.restore();
+    g.save(); g.translate(cx, cy - 6); g.rotate(-0.4); g.drawImage(skinFrame(equipped().id, 1), -18, -12, 36, 24); g.restore();
     text('SLAPPY BIRD', cx, cy + 36, 2, '#543847', '#000', 0);
   }
 }
@@ -2902,7 +2922,7 @@ function draw() {
   const frame = state === 'over' || (state !== 'ready' && bird.rot > 1.2) ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4];
   if (!(bird.inv > 0 && (tick >> 2) & 1)) {
     g.save(); g.translate(BIRD_X, Math.round(bird.y)); g.rotate(bird.rot);
-    g.drawImage(skinFrame(stats.skin && hasSkin(stats.skin) ? stats.skin : 'classic', frame), -18, -12, 36, 24);
+    g.drawImage(skinFrame(equipped().id, frame), -18, -12, 36, 24);
     if (state === 'revive' && rev.t > 20) { g.globalAlpha = 0.3 + 0.25 * Math.sin(tick * 0.3); g.drawImage(birdWhite, -18, -12, 36, 24); g.globalAlpha = 1; }
     g.restore();
   }
