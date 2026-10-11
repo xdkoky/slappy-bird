@@ -80,6 +80,12 @@ const SAVED = Object.assign({ best: 0, sens: 6, crt: true, muted: false }, windo
 try { if (!window.SAVED) Object.assign(SAVED, JSON.parse(localStorage.getItem('slappy') || '{}')); } catch {}
 let best = SAVED.best | 0, sensLevel = SAVED.sens | 0 || 6, crtOn = SAVED.crt !== false, muted = !!SAVED.muted, notesSeen = SAVED.notes | 0;
 let bank = SAVED.coins | 0, tokens = SAVED.tokens | 0;   // coins and slot tokens carry over between runs
+// lifetime stats for the skin challenges, unlocked / equipped skins
+const STATS0 = { runs: 0, pipes: 0, coins: 0, tokens: 0, parries: 0, bosses: 0, maxBossRun: 0, revives: 0, racesWon: 0, skins: ['classic'], skin: 'classic', fresh: 0, devSeen: false };
+let stats = Object.assign({}, STATS0);
+try { Object.assign(stats, window.SAVED && SAVED.stats || JSON.parse(localStorage.getItem('slappy-stats') || 'null') || SAVED.stats || {}); } catch {}
+if (!Array.isArray(stats.skins)) stats.skins = ['classic'];
+
 // ============================================================ online leaderboard config
 // Fill in from Supabase: Project URL + publishable (or legacy "anon public") key. Both are meant to be
 // public. Leave empty and the leaderboard stays hidden. Database setup: supabase/leaderboard.sql
@@ -107,13 +113,14 @@ const player = {
   named: (SAVED.pnamed ?? idStore.pnamed) !== false,     // false = renamed, server doesn't know yet
   bestSynced: !!(SAVED.pbsync || idStore.pbsync),        // has the best from before the leaderboard been uploaded?
   picked: !!(SAVED.ppick || idStore.ppick),              // has the player chosen a nickname (or skipped the prompt)?
+  isDev: !!(SAVED.pdev || idStore.pdev),                 // the leaderboard says this row is the developer's
 };
 if (!isRandomName(player.name)) player.picked = true;   // already has a real name
 
 function save() {
   const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens,
-    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced, ppick: player.picked };
-  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync, ppick: d.ppick })); } catch {}
+    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced, ppick: player.picked, pdev: player.isDev, stats };
+  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync, ppick: d.ppick, pdev: d.pdev })); } catch {}
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -602,6 +609,90 @@ const SYM = {
 };
 const birdWhite = silhouette(birdFrames[1]);
 
+// ============================================================ skins (camo-grind style)
+// Each skin recolours the bird (palette keys: k outline, y body, Y highlight, o belly, w eye, v wing,
+// r/R beak). Some draw a pattern on the body, some animate, and the top tiers glow and light the world.
+// Every skin but CLASSIC unlocks through a challenge; the mastery tiers unlock in order like a camo grind.
+const hash2 = (x, y) => { let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return ((h ^ (h >> 16)) >>> 0) / 4294967296; };
+const camo = cols => (x, y) => cols[Math.floor(hash2(Math.floor((x + (y % 2)) / 3), Math.floor(y / 2)) * cols.length)];
+const SKINS = [
+  { id: 'classic',  name: 'CLASSIC',       tier: 'base', pal: {}, how: 'THE ORIGINAL', need: () => true },
+  { id: 'cardinal', name: 'CARDINAL',      tier: 'base', pal: { y: '#e8302a', Y: '#ff8070', o: '#ffb48a', v: '#ffe8e0', r: '#ffc21c', R: '#e08a10' }, how: 'SCORE 10 IN ONE RUN', need: () => [best, 10] },
+  { id: 'bluebird', name: 'BLUEBIRD',      tier: 'base', pal: { y: '#3a8ef0', Y: '#90c8ff', o: '#f4d4a0', v: '#e8f4ff', r: '#ff9a30', R: '#d86a10' }, how: 'PLAY 10 RUNS', need: () => [stats.runs, 10] },
+  { id: 'lime',     name: 'LIME',          tier: 'base', pal: { y: '#7ad83a', Y: '#cdf880', o: '#f8f0a0' }, how: 'COLLECT 100 COINS', need: () => [stats.coins, 100] },
+  { id: 'flamingo', name: 'FLAMINGO',      tier: 'base', pal: { y: '#ff6ab4', Y: '#ffb4dc', o: '#ffe0f0', v: '#fff4fa' }, how: 'PARRY 10 FIREBALLS', need: () => [stats.parries, 10] },
+  { id: 'arctic',   name: 'ARCTIC',        tier: 'base', pal: { k: '#2a3a5a', y: '#e4f0fc', Y: '#ffffff', o: '#c4d8ee', v: '#ffffff', r: '#ff9a30' }, how: 'SCORE 25 IN ONE RUN', need: () => [best, 25] },
+  { id: 'midnight', name: 'MIDNIGHT',      tier: 'base', pal: { k: '#0c0a18', y: '#2c2c50', Y: '#4c4c80', o: '#6a5aa0', w: '#ffe14d', v: '#9a9ac0', r: '#c0c0e0', R: '#8080b0' }, how: 'BEAT A BOSS', need: () => [stats.bosses, 1] },
+  { id: 'woodland', name: 'WOODLAND CAMO', tier: 'base', pal: { o: '#a89a6a', v: '#d8d0a8' }, pat: camo(['#5a7a3a', '#3a5a2a', '#8a7a4a', '#2a3a1a', '#5a7a3a']), how: 'PASS 250 PIPES', need: () => [stats.pipes, 250] },
+  { id: 'desert',   name: 'DESERT CAMO',   tier: 'base', pal: { o: '#e8d8b0', v: '#f4ecd4' }, pat: camo(['#d8b878', '#b8905a', '#8a6a40', '#e8d0a0', '#d8b878']), how: 'CATCH 3 TOKENS', need: () => [stats.tokens, 3] },
+  { id: 'tiger',    name: 'TIGER',         tier: 'base', pal: { o: '#fff4e0' }, pat: (x, y, ch) => ch === 'o' ? null : ((x + y * 0.7) % 5 < 1.4 ? '#2a1a10' : ch === 'Y' ? '#ffb050' : '#ff8a1c'), how: 'BEAT 3 BOSSES', need: () => [stats.bosses, 3] },
+  { id: 'zebra',    name: 'ZEBRA',         tier: 'base', pal: { r: '#ff9a30' }, pat: (x, y) => ((x * 0.8 - y * 0.6 + 40) % 4 < 1.6 ? '#1a1a1a' : '#f4f4f4'), how: 'SCORE 40 IN ONE RUN', need: () => [best, 40] },
+  { id: 'lucky',    name: 'LUCKY',         tier: 'base', pal: { y: '#ffd23f', Y: '#fff4a0' }, pat: (x, y, ch) => ch !== 'o' && x % 4 === 1 && y % 3 === 1 ? '#f83850' : null, how: 'GET REVIVED BY THE SLOTS', need: () => [stats.revives, 1] },
+  { id: 'racer',    name: 'RACER',         tier: 'base', pal: { r: '#f83850', R: '#b01830' }, pat: (x, y, ch) => ch === 'o' ? '#f83850' : (((x >> 1) + (y >> 1)) & 1 ? '#1a1a1a' : '#f4f4f4'), how: 'WIN A 1V1 RACE', need: () => [stats.racesWon, 1], race: true },
+  // mastery: in order
+  { id: 'gold',     name: 'GOLD',          tier: 'gold', pal: { k: '#6a4808', y: '#f8c81c', Y: '#fff4a0', o: '#d8a010', v: '#fff0b0', r: '#fff4a0', R: '#d8a010' }, sheen: '#fffbe0',
+    how: 'UNLOCK EVERY SKIN ABOVE', need: () => [SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON) && hasSkin(k.id)).length, SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON)).length] },
+  { id: 'platinum', name: 'PLATINUM',      tier: 'plat', pal: { k: '#4a5068', y: '#d4dae8', Y: '#ffffff', o: '#a8b0c8', v: '#ffffff', r: '#c0c8d8', R: '#8890a8' }, sheen: '#ffffff', after: 'gold',
+    how: 'GOLD + SCORE 60 IN ONE RUN', need: () => [best, 60] },
+  { id: 'diamond',  name: 'DIAMOND',       tier: 'diamond', pal: { k: '#1a4a6a', o: '#c8f4ff', v: '#ffffff', r: '#e8fcff', R: '#a8e0f8' }, glow: [0.5, 0.9, 1], after: 'platinum', sparkle: '#e8ffff',
+    pat: (x, y, ch, t) => ch === 'o' ? null : hash2(x, y + (t >> 4)) > 0.93 ? '#ffffff' : ((x + y) % 4 < 2 ? '#a8f0ff' : (x - y + 20) % 5 < 2 ? '#5ad0f8' : '#80e4ff'),
+    how: 'PLATINUM + BEAT 3 BOSSES IN ONE RUN', need: () => [stats.maxBossRun, 3] },
+  { id: 'darkmatter', name: 'DARK MATTER', tier: 'dark', pal: { k: '#0a0414', o: '#3a1060', v: '#c080ff', w: '#f0d0ff', r: '#b040e0', R: '#6a20a0' }, glow: [0.85, 0.15, 1], after: 'diamond', sparkle: '#e0a0ff',
+    pat: (x, y, ch, t) => { if (hash2(x * 3, y + (t >> 3)) > 0.965) return '#ffffff'; const n = Math.sin(x * 0.9 + t * 0.08) + Math.cos(y * 1.1 - t * 0.06) + Math.sin((x + y) * 0.5 + t * 0.05); return ['#12061e', '#2a0c48', '#4c1880', '#8030c8', '#c060ff'][clamp(Math.floor(n + 2.2), 0, 4)]; },
+    how: 'DIAMOND + SCORE 100 IN ONE RUN', need: () => [best, 100] },
+  { id: 'dev',      name: 'DEV',           tier: 'dev', pal: { k: '#1a0a20', w: '#ffffff', v: '#ffffff' }, glow: [1, 0.3, 0.75], sparkle: '#ffd0f0',
+    pat: (x, y, ch, t) => `hsl(${(x * 18 + y * 9 + t * 5) % 360},100%,${ch === 'o' ? 70 : ch === 'Y' ? 66 : 55}%)`,
+    how: 'ONLY THE DEV HAS THIS ONE', need: () => player.isDev },
+];
+const skinById = id => SKINS.find(k => k.id === id) || SKINS[0];
+const hasSkin = id => stats.skins.includes(id);
+const skinProgress = k => {        // [have, need] or a boolean
+  if (k.after && !hasSkin(k.after)) return [0, 1];
+  const r = k.need(); return Array.isArray(r) ? r : (r ? [1, 1] : [0, 1]);
+};
+const skinReady = k => { const [a, b] = skinProgress(k); return a >= b; };
+const equipped = () => skinById(hasSkin(stats.skin) ? stats.skin : 'classic');
+let statsDirty = false, toasts = [];
+function statAdd(key, n = 1) { if (raceOn() && key !== 'racesWon') return; stats[key] = (stats[key] || 0) + n; statsDirty = true; }
+function checkSkins(silent) {
+  for (const k of SKINS) if (!hasSkin(k.id) && (!k.race || RACE_ON) && skinReady(k)) {
+    stats.skins.push(k.id); stats.fresh = (stats.fresh || 0) + 1; statsDirty = true;
+    if (!silent) { toasts.push({ id: k.id, t: 0 }); sfx('token'); }
+  }
+  if (statsDirty) { statsDirty = false; saveStats(); }
+}
+function saveStats() { try { localStorage.setItem('slappy-stats', JSON.stringify(stats)); } catch {} save(); }
+// Built frames per skin; animated skins rebuild every few ticks (each frame is only 18x13 pixels).
+const skinCache = new Map();
+function skinFrame(id, f, t = tick) {
+  const k = skinById(id), animated = !!(k.sheen || k.glow || k.tier === 'dev');
+  const bucket = animated ? (t >> 1) : 0, key = id + f + '|' + bucket;
+  let c = skinCache.get(key); if (c) return c;
+  if (skinCache.size > 400) skinCache.clear();
+  const pal = Object.assign({}, C, k.pal);
+  c = document.createElement('canvas'); c.width = 18; c.height = BIRD.length; const x = c.getContext('2d');
+  BIRD.forEach((row, j) => [...row].forEach((ch, i) => {
+    if (!pal[ch]) return;
+    x.fillStyle = (k.pat && 'yYo'.includes(ch) && k.pat(i, j, ch, t)) || pal[ch]; x.fillRect(i, j, 1, 1);
+  }));
+  WING.forEach((row, j) => [...row].forEach((ch, i) => { if (pal[ch]) { x.fillStyle = pal[ch]; x.fillRect(i, j + 4 + [-1, 0, 1][f], 1, 1); } }));
+  if (k.sheen) {                                  // a shine sweeping across now and then
+    const ph = (t % 150) / 40;
+    if (ph < 1) {
+      x.globalCompositeOperation = 'source-atop'; x.fillStyle = k.sheen; x.globalAlpha = 0.8;
+      const sx = -8 + ph * 34;
+      for (let j = 0; j < c.height; j++) x.fillRect(Math.round(sx - j * 0.6), j, 3, 1);
+      x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+    }
+  }
+  skinCache.set(key, c); return c;
+}
+function skinFX(k, x, y) {                        // sparkles around glowing skins
+  if (!k.sparkle || state === 'over' || (tick & 3)) return;
+  sparks.push({ x: x + rand(-16, 16), y: y + rand(-12, 12), vx: rand(-0.3, 0.3), vy: rand(-0.8, -0.2), life: 18, col: k.sparkle, sz: 2 });
+}
+
+
 // seeded RNG for a deterministic, tileable background
 let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 const bg = (() => {
@@ -680,8 +771,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 12;
+const NOTES_VERSION = 13;
 const PATCH_NOTES = [
+  { title: 'SKINS', items: [
+    { h: 'EARN NEW LOOKS', col: '#e86a17', t: 'TAP SKINS TO SEE 13 SKINS. EACH ONE UNLOCKS WITH A CHALLENGE.' },
+    { h: 'THE GRIND', col: '#c8860c', t: 'GET THEM ALL FOR GOLD. THEN PLATINUM, DIAMOND AND DARK MATTER. GOOD LUCK!' },
+  ] },
   { title: '1V1 RACE', items: [
     { h: 'RACE A FRIEND', col: '#3a90d8', t: 'TAP RACE AND CREATE A ROOM. YOUR FRIEND JOINS WITH THE 4 LETTER CODE ON THEIR PHONE.' },
     { h: 'SAME PIPES LIVE', col: '#1a5a90', t: 'YOU FLY THE SAME COURSE AND SEE EACH OTHER AS A BLUE GHOST. LAST BIRD FLYING WINS!' },
@@ -876,6 +971,7 @@ function flap(src) {
   if (settingsOpen) { if (src !== 'slap') closeSettings(); return; }   // slaps just move the meter
   if (lb.open) { if (src !== 'slap') closeLB(); return; }
   if (a2hs.open) { if (src !== 'slap') closeA2HS(); return; }
+  if (skinsUI.open) { if (src !== 'slap') closeSkins(); return; }
   if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
@@ -1041,14 +1137,14 @@ function updateCoins(sp) {
     }
     if (state !== 'play' || (p && p.intro < INTRO)) continue;
     if (c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + 12) {
-      c.dead = true; tokens++; tokenBump = 8; save();
+      c.dead = true; tokens++; tokenBump = 8; statAdd('tokens'); save();
       popup('+1 TOKEN', c.x, c.y - 20, { sc: 3, fill: '#f0a0ff', ol: '#2a0838', life: 50, vy: -0.6 });
       burst(c.x, c.y, 24, ['#f0a0ff', '#c040e0', '#fff'], 4.5, 24, 4);
       rings.push({ x: c.x, y: c.y, r: 8, dr: 4, life: 16, col: '#f0a0ff' });
       sfx('token'); continue;
     }
     if (!c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + (c.big ? 10 : 7)) {
-      const v = c.big ? 5 : 1; c.dead = true; bank += v; coinBump = 8;
+      const v = c.big ? 5 : 1; c.dead = true; bank += v; coinBump = 8; statAdd('coins', v);
       popup('+' + v, c.x, c.y - 16, { sc: c.big ? 3 : 2, fill: '#ffe14d', ol: '#7a4a08', life: 30 });
       burst(c.x, c.y, c.big ? 16 : 7, ['#fff4a0', '#f8c81c', '#fff'], c.big ? 3.5 : 2.2, 16);
       if (c.big) rings.push({ x: c.x, y: c.y, r: 6, dr: 3, life: 12, col: '#fff4a0' });
@@ -1086,7 +1182,7 @@ function downed() {
     state = 'slot';
     slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0,
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
-  } else { state = 'over'; overT = 0; lbSubmit(score); }
+  } else { state = 'over'; overT = 0; lbSubmit(score); statAdd('runs'); checkSkins(); }
 }
 function spin() {
   const s = slot;
@@ -1143,11 +1239,12 @@ function resolveSpin() {
   }
   if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
-function giveUp() { state = 'over'; overT = 0; slot = null; lbSubmit(score); }
+function giveUp() { state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
 
 // ------------------------------------------------------------ revive
 // A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
 function startRevive() {
+  statAdd('revives');
   const ahead = pipes.filter(p => p.x + 52 > BIRD_X - 24).sort((a, b) => a.x - b.x);
   const targets = ahead.slice(0, 1);
   if (ahead[1] && ahead[1].x - BIRD_X < 300) targets.push(ahead[1]);
@@ -1340,13 +1437,14 @@ function updateBoss() {
       setBanner('BOSS DEFEATED!', 'BONUS +10', 'victory', 130);
       setTimeout(() => sfx('victory'), 250);
       bossesBeaten++; nextBossAt = spawned + BOSS_EVERY; boss = null;
+      statAdd('bosses'); if (bossesBeaten > (stats.maxBossRun || 0) && !raceOn()) { stats.maxBossRun = bossesBeaten; statsDirty = true; }
     }
   }
 }
 
 function parry(s, d) {
   const perfect = d < 34;
-  s.refl = true; s.r = 9; combo++; parries++;
+  s.refl = true; s.r = 9; combo++; parries++; statAdd('parries');
   const bx = boss ? boss.x : LW + 50, by = boss ? boss.y : s.y;
   const a = Math.atan2(by - s.y, bx - s.x); s.vx = Math.cos(a) * 9; s.vy = Math.sin(a) * 9;
   hitstop = perfect ? 8 : 5; shake = Math.max(shake, perfect ? 9 : 6);
@@ -1425,6 +1523,8 @@ function updateFX() {
 
 function update() {
   tick++;
+  if (tick % 30 === 0) checkSkins();
+  for (const t of toasts) t.t++; toasts = toasts.filter(t => t.t < 170);
   if (state === 'over' && overT === 60 && LB_ON && !player.picked && !raceOn() && !nameBoxOpen) editName(true);
   if (race.phase !== 'off' || race.panel) raceTick();
   if (hitstop > 0) { hitstop--; updateFX(); return; }                       // impact freeze
@@ -1461,7 +1561,7 @@ function update() {
     for (const p of pipes) {
       p.x -= sp; p.intro++; p.t++; pipeShape(p);
       if (p.intro < INTRO) continue;
-      if (!p.passed && p.x + 24 < BIRD_X) { p.passed = true; score++; passedPipes++; sfx('point'); }
+      if (!p.passed && p.x + 24 < BIRD_X) { p.passed = true; score++; passedPipes++; statAdd('pipes'); sfx('point'); }
       if (hitPipe(p)) { crash(false); break; }
     }
     pipes = pipes.filter(p => p.x > -60);
@@ -1563,11 +1663,11 @@ function wideTopBar() {
   text(s, sx + 30, 30, 2, '#fff', '#000', 0, 'l');
 }
 function wideControls() {
-  if (TOUCH) return LB_ON && state === 'over' ? buttonRow(436, [['LEADERBOARD', openLB], ['SETTINGS', openSettings]], 16) : settingsButton(436);
+  if (TOUCH) { if (state === 'over') buttonRow(436, [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['SKINS', openSkins], ['SETTINGS', openSettings]], 16); else settingsButton(436); skinsButtonBadge(); return; }
   const y = 438;
   const left = sensorLive() ? 'SENSITIVITY ' + sensLevel : 'NO SENSOR: SPACE OR CLICK TO FLAP';
   const leftW = sensorLive() ? 18 + 4 + 18 + 10 + tw(left) + 14 + 120 : tw(left);
-  const right = [['S', 'SETTINGS', openSettings], ...(LB_ON ? [['L', 'SCORES', openLB]] : []), ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
+  const right = [['S', 'SETTINGS', openSettings], ['K', 'SKINS', openSkins], ...(LB_ON ? [['L', 'SCORES', openLB]] : []), ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
   const rightW = hintsWidth(right), margin = 40, stacked = leftW + rightW + margin * 2 + 40 > LW;
   let lx = stacked ? (LW - leftW) / 2 : margin;
   if (sensorLive()) {
@@ -1676,8 +1776,8 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // ============================================================ settings menu
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
-const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && (state === 'ready' || (state === 'over' && overT > 50));
-function openSettings() { if (!settingsAllowed()) return; a2hs.open = false; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
+const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && !skinsUI.open && (state === 'ready' || (state === 'over' && overT > 50));
+function openSettings() { if (!settingsAllowed()) return; a2hs.open = false; skinsUI.open = false; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
   const label = 'SETTINGS', w = tw(label) + 28;
@@ -1688,6 +1788,7 @@ function drawSettings() {
   if (!TOUCH) rows.push(['SENSITIVITY']);
   if (NATIVE) rows.push(['FULLSCREEN', fullscreen, toggleFullscreen]);
   if (LB_ON) rows.push(['NAME']);
+  if (state === 'ready') rows.push(['PATCH NOTES']);
   const w = wide ? 400 : LW - 28, x = Math.round((LW - w) / 2), meter = !TOUCH;
   const h = 66 + rows.length * 42 + (meter ? 30 : 0) + 56;
   const y = clamp(Math.round(214 - h / 2), 8, Math.max(8, LH - h - 8));
@@ -1710,6 +1811,7 @@ function drawSettings() {
       ly += 30;
       continue;
     }
+    if (label === 'PATCH NOTES') { button(bx - 72, ly, 72, 30, 'VIEW', () => { settingsOpen = false; openNotes(); }); ly += 42; continue; }
     if (label === 'NAME') { const nw = Math.min(tw(player.name) + 24, w - 90); button(bx - nw, ly, nw, 30, player.name, editName); ly += 42; continue; }
     button(bx - 72, ly, 72, 30, on ? 'ON' : 'OFF', act, on);
     ly += 42;
@@ -1767,14 +1869,15 @@ function raceDisconnect() {
   const ws = race.ws; race.ws = null; race.joined = false; clearInterval(race.hb);
   if (ws) { try { if (ws.readyState === 1) ws.send(JSON.stringify({ topic: race.topic, event: 'broadcast', ref: null, payload: { type: 'broadcast', event: 'leave', payload: { id: player.id } } })); ws.close(); } catch {} }
 }
-function raceHello() { race.helloT = performance.now(); raceSend('hello', { name: player.name, role: race.role }); }
+function raceHello() { race.helloT = performance.now(); raceSend('hello', { name: player.name, role: race.role, skin: equipped().id }); }
 function raceMsg(ev, d) {
   const o = race.opp;
   if (o && d.id && d.id !== o.id) return;                       // a third phone in the room: ignore it
   if (ev === 'hello' || ev === 'hi') {
     if (!o) race.opp = { id: d.id, name: cleanName(d.name) || 'PLAYER', d: 0, y: 240, r: 0, s: 0, done: false, left: false, ready: false, recvAt: performance.now(), dy: 240 };
     else { o.name = cleanName(d.name) || o.name; o.left = false; }
-    if (ev === 'hello') raceSend('hi', { name: player.name, role: race.role });
+    race.opp.skin = SKINS.some(k => k.id === d.skin) ? d.skin : null;
+    if (ev === 'hello') raceSend('hi', { name: player.name, role: race.role, skin: equipped().id });
     if (!o) sfx('blip', true);
   } else if (!o) return;
   else if (ev === 'start' && race.role === 'guest') raceStart(d.seed);
@@ -1838,7 +1941,7 @@ function raceCheckEnd() {
   if (!gone && !o.done) return;
   race.result = gone ? 'left' : race.myDist > o.d + 0.5 ? 'win' : race.myDist < o.d - 0.5 ? 'lose' : 'draw';
   race.panel = 'done';
-  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); }
+  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); statAdd('racesWon'); checkSkins(); }
   else if (race.result === 'lose') sfx('lose');
 }
 function raceRematch() {
@@ -1859,7 +1962,8 @@ function drawRaceGhost() {                           // inside the foreground la
   o.dy += (o.y - o.dy) * 0.35;
   const x = raceOppX(); if (x < -30 || x > LW + 30) return;
   g.save(); g.globalAlpha = o.done ? 0.45 : 0.8; g.translate(Math.round(x), Math.round(o.dy)); g.rotate(o.done ? 1.4 : o.r);
-  g.drawImage(ghostFrames[o.done ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4]], -18, -12, 36, 24);
+  const gf = o.done ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4];
+  g.drawImage(o.skin ? skinFrame(o.skin, gf) : ghostFrames[gf], -18, -12, 36, 24);
   g.restore(); g.globalAlpha = 1;
   text(o.name, clamp(x, tw(o.name) / 2 + 4, LW - tw(o.name) / 2 - 4), o.dy - 34, 2, '#d8f4ff', '#1a3050', 2);
 }
@@ -1969,7 +2073,10 @@ function lbLoad() {
     if (lb.busy[kind]) continue;
     lb.busy[kind] = true;
     lbCall('leaderboard', { p_kind: kind, p_id: player.id })
-      .then(rows => { lb.data[kind] = { rows: rows || [], t: performance.now() }; })
+      .then(rows => {
+        lb.data[kind] = { rows: rows || [], t: performance.now() };
+        if ((rows || []).some(r => r.me && r.dev) && !player.isDev) { player.isDev = true; save(); checkSkins(); }
+      })
       .catch(() => { if (!lb.data[kind]) lb.data[kind] = { err: true }; })
       .finally(() => { lb.busy[kind] = false; });
   }
@@ -1991,6 +2098,83 @@ function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side b
   items.forEach(([l, act], i) => { button(x, y, ws[i], 30, l, act); x += ws[i] + gap; });
 }
 const openNotes = () => { notesPage = 0; sfx('blip', true); };
+
+// ============================================================ skins screen
+const skinsUI = { open: false, sel: null, rect: null };
+function openSkins() { if (!settingsAllowed()) return; skinsUI.open = true; skinsUI.sel = equipped().id; stats.fresh = 0; saveStats(); notesPage = -1; sfx('blip', true); }
+function closeSkins() { skinsUI.open = false; sfx('blip', false); }
+const TIER_COL = { base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
+function drawSkins() {
+  const list = SKINS.filter(k => !k.race || RACE_ON);
+  const cols = wide ? 6 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
+  const rows = Math.ceil(list.length / cols), h = 54 + rows * ch + 152;
+  const y = clamp(Math.round((Math.min(LH, 600) - h) / 2), 6, Math.max(6, LH - h - 6));
+  skinsUI.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('SKINS', LW / 2, y + 10, 3, '#fff', '#543847', 2);
+  text(stats.skins.filter(id => list.some(k => k.id === id)).length + ' / ' + list.length + ' UNLOCKED', LW / 2, y + 36, 2, '#8a7438', '#000', 0);
+  const gx = x + Math.round((w - cols * cw) / 2), gy = y + 54;
+  list.forEach((k, i) => {
+    const cx = gx + (i % cols) * cw, cy = gy + Math.floor(i / cols) * ch, have = hasSkin(k.id);
+    const isEq = equipped().id === k.id, isSel = skinsUI.sel === k.id;
+    g.fillStyle = '#543847'; g.fillRect(cx + 2, cy + 2, cw - 4, ch - 4);
+    g.fillStyle = have ? '#fff8d8' : '#b8ac80'; g.fillRect(cx + 4, cy + 4, cw - 8, ch - 8);
+    g.fillStyle = TIER_COL[k.tier]; g.fillRect(cx + 4, cy + ch - 8, cw - 8, 4);          // tier strip
+    const bx = cx + (cw >> 1), by = cy + 20;
+    if (have) {
+      g.save(); g.translate(bx, by); g.rotate(-0.15); g.drawImage(skinFrame(k.id, [0, 1, 2, 1][(tick / 6 | 0) % 4]), -18, -13, 36, 26); g.restore();
+    } else {
+      g.globalAlpha = 0.3; g.drawImage(birdShadow(), bx - 18, by - 13, 36, 26); g.globalAlpha = 1;
+      g.fillStyle = '#543847'; g.fillRect(bx - 6, by - 2, 12, 9); g.fillRect(bx - 4, by - 7, 2, 5); g.fillRect(bx + 2, by - 7, 2, 5); g.fillRect(bx - 4, by - 8, 8, 2);   // padlock
+      g.fillStyle = '#c9b968'; g.fillRect(bx - 1, by + 1, 2, 3);
+    }
+    if (isEq) { g.fillStyle = '#e86a17'; for (const [ox, oy, ow, oh] of [[0, 0, cw, 2], [0, ch - 2, cw, 2], [0, 0, 2, ch], [cw - 2, 0, 2, ch]]) g.fillRect(cx + ox, cy + oy, ow, oh); }
+    if (isSel && !isEq) { g.fillStyle = '#fff'; for (const [ox, oy, ow, oh] of [[0, 0, cw, 2], [0, ch - 2, cw, 2], [0, 0, 2, ch], [cw - 2, 0, 2, ch]]) g.fillRect(cx + ox, cy + oy, ow, oh); }
+    buttons.push({ x: cx, y: cy, w: cw, h: ch, act: () => { skinsUI.sel = k.id; sfx('blip', true); } });
+  });
+  // details of the selected skin
+  const k = skinById(skinsUI.sel || 'classic'), have = hasSkin(k.id), dy = gy + rows * ch + 8;
+  g.fillStyle = '#c9b968'; g.fillRect(x + 10, dy - 4, w - 20, 2);
+  text(k.name, x + 14, dy + 4, 2, k.tier === 'base' ? '#543847' : TIER_COL[k.tier] === '#c8d0e0' ? '#6a7290' : TIER_COL[k.tier], '#000', 0, 'l');
+  const tierName = { base: '', gold: 'MASTERY', plat: 'MASTERY', diamond: 'MASTERY', dark: 'MASTERY', dev: 'SECRET' }[k.tier];
+  if (tierName) text(tierName, x + w - 14, dy + 4, 2, '#8a7438', '#000', 0, 'r');
+  const max = Math.floor((w - 28 + 2) / 12); let ly = dy + 24;
+  for (const l of wrapText(k.how, max)) { text(l, x + 14, ly, 2, '#8a7438', '#000', 0, 'l'); ly += 18; }
+  if (!have && k.tier !== 'dev') {                // progress bar
+    const [a, b] = skinProgress(k), bw = w - 28 - 70, pk = clamp(a / b, 0, 1);
+    g.fillStyle = '#543847'; g.fillRect(x + 14, ly + 2, bw, 10); g.fillStyle = '#e8dcb0'; g.fillRect(x + 16, ly + 4, bw - 4, 6);
+    g.fillStyle = '#e86a17'; g.fillRect(x + 16, ly + 4, Math.round((bw - 4) * pk), 6);
+    text(k.after && !hasSkin(k.after) ? 'LOCKED' : Math.min(a, b) + '/' + b, x + w - 14, ly, 2, '#543847', '#000', 0, 'r');
+    if (k.after && !hasSkin(k.after)) text('NEEDS ' + skinById(k.after).name + ' FIRST', x + 14, ly + 18, 2, '#c2310c', '#000', 0, 'l');
+  }
+  const eqd = equipped().id === k.id;
+  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; saveStats(); sfx('coin'); } }, have && !eqd);
+  button(x + w - 14 - 100, y + h - 42, 100, 30, 'DONE', closeSkins);
+}
+let birdShadowC = null;
+function birdShadow() {           // dark silhouette for locked skins (made once)
+  if (birdShadowC) return birdShadowC;
+  const c = silhouette(birdFrames[1]), x = c.getContext('2d');
+  x.globalCompositeOperation = 'source-in'; x.fillStyle = '#543847'; x.fillRect(0, 0, c.width, c.height);
+  return birdShadowC = c;
+}
+function skinsButtonBadge() {     // red NEW dot on the SKINS button
+  const b = buttons.find(b => b.label === 'SKINS'); if (!b || !stats.fresh) return;
+  const bx = b.x + b.w - 10, by = b.y + 4;
+  pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(stats.fresh, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
+}
+function drawToasts() {           // "NEW SKIN!" cards sliding in at the top
+  toasts.slice(0, 1).forEach(tt => {
+    const k = skinById(tt.id), e = Math.min(1, tt.t / 12, (170 - tt.t) / 14), w = Math.max(tw(k.name) + 70, 190), x = Math.round((LW - w) / 2);
+    const y = Math.round(-60 + e * (wide ? 96 : 102));
+    drawPanel(x, y, w, 44);
+    g.drawImage(skinFrame(k.id, [0, 1, 2, 1][(tick / 6 | 0) % 4]), x + 8, y + 9, 36, 26);
+    text('NEW SKIN!', x + 52, y + 6, 2, '#e86a17', '#000', 0, 'l');
+    text(k.name, x + 52, y + 24, 2, '#543847', '#000', 0, 'l');
+  });
+}
 
 // ============================================================ add to Home Screen tutorial
 // Shown to people playing in a phone browser (not already the Home Screen app): opens by itself once
@@ -2296,10 +2480,10 @@ function drawCompactHUD() {
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
     if (LB_ON) buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['RACE', openRace]] : [['LEADERBOARD', openLB]]); else notesButton(340);
     if (TOUCH) {
-      if (LB_ON) buttonRow(420, [['NOTES', openNotes], ['SETTINGS', openSettings]]); else settingsButton(420);
+      buttonRow(420, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
       text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0);
     } else {
-      if (LB_ON) buttonRow(376, [['NOTES', openNotes], ['SETTINGS', openSettings]]); else settingsButton(376);
+      buttonRow(376, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
       drawMeter(414);
       text('BEST ' + best, LW / 2, 450, 2, '#e86a17', '#ded895', 0);
       text('S:SETTINGS  F:FULL', LW / 2, 468, 2, '#8a7438', '#ded895', 0);
@@ -2311,7 +2495,7 @@ function drawCompactHUD() {
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
       if (!canSpin()) text('50 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
-      if (TOUCH) { if (LB_ON) { lbButton(null, 420); settingsButton(458); } else settingsButton(420); } else drawMeter(414);
+      if (TOUCH) { if (LB_ON) lbButton(null, 420); buttonRow(LB_ON ? 458 : 420, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge(); } else drawMeter(414);
     }
   }
 }
@@ -2329,7 +2513,9 @@ function drawWideHUD() {
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
-    if (LB_ON) buttonRow(344, [['LEADERBOARD', openLB], ...(RACE_ON ? [['1V1 RACE', openRace]] : []), ['PATCH NOTES', openNotes]], 16); else notesButton(344);
+    { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ...(RACE_ON ? [['RACE', openRace]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
+      while (it.reduce((a, [l]) => a + tw(l) + 28 + 16, -16) > LW - 40) it.pop();
+      buttonRow(344, it, 16); skinsButtonBadge(); }
     wideControls();
   }
   if (state === 'over') {
@@ -2684,14 +2870,16 @@ function draw() {
   const frame = state === 'over' || (state !== 'ready' && bird.rot > 1.2) ? 1 : [0, 1, 2, 1][(tick / 5 | 0) % 4];
   if (!(bird.inv > 0 && (tick >> 2) & 1)) {
     g.save(); g.translate(BIRD_X, Math.round(bird.y)); g.rotate(bird.rot);
-    g.drawImage(birdFrames[frame], -18, -12, 36, 24);
+    g.drawImage(skinFrame(stats.skin && hasSkin(stats.skin) ? stats.skin : 'classic', frame), -18, -12, 36, 24);
     if (state === 'revive' && rev.t > 20) { g.globalAlpha = 0.3 + 0.25 * Math.sin(tick * 0.3); g.drawImage(birdWhite, -18, -12, 36, 24); g.globalAlpha = 1; }
     g.restore();
   }
   if ((state === 'revive' && rev.t > 30) || (halo > 0 && (halo > 40 || (tick >> 2) & 1))) drawHalo(BIRD_X, Math.round(bird.y) - 22);
+  skinFX(equipped(), BIRD_X, bird.y);
   if (raceOn()) drawRaceGhost();
   endForeground();
   drawConfetti();
+  if (toasts.length) drawToasts();
   if (hover > 0 && state === 'play') {
     const k = hover / HOVER_MAX, bw = 80, bx = BIRD_X - bw / 2, by = Math.round(bird.y) + 24;
     if ((tick / 20 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLY' : 'FLAP TO FLY', clamp(BIRD_X, 70, LW - 70), Math.round(bird.y) - 46, 2, '#fff', '#543847');
@@ -2717,6 +2905,7 @@ function draw() {
   if (settingsOpen) drawSettings();
   if (lb.open) drawLB();
   if (race.panel) drawRacePanel();
+  if (skinsUI.open) drawSkins();
   if (a2hs.open) drawA2HS();
   if (nameBoxOpen) drawNameBox();
   if (paused && resumeT) {
@@ -2864,6 +3053,8 @@ function gatherLights() {
     else if (c.big && (!c.pipe || c.pipe.intro >= INTRO)) addLight(c.x, c.y, 40, 0.3 * pulse, [1, 0.85, 0.35]);
   }
   for (const r of rings) addLight(r.x, r.y, r.r + 30, 0.25, [1, 0.95, 0.75]);
+  const sk = equipped();                                                // glowing skins light up their surroundings
+  if (sk.glow && state !== 'over') addLight(BIRD_X, bird.y, sk.tier === 'dev' ? 78 : 64, (sk.tier === 'dev' ? 0.6 : 0.42) + 0.12 * Math.sin(tick * 0.12), sk.glow);
   for (const f of flashes) {                                           // finish line burst: hot flash, warm fade
     const k = 1 - f.t / f.life, e = k * k;
     addLight(f.x, f.y, (f.big ? 175 : 140) * (0.6 + 0.4 * k), 0.95 * e, k > 0.7 ? [1, 0.95, 0.85] : [1, 0.8, 0.5]);
@@ -2975,8 +3166,9 @@ addEventListener('keydown', e => {
   else if (k === 'KeyS') { if (settingsOpen) closeSettings(); else openSettings(); }
   else if (k === 'KeyL' && LB_ON) { if (lb.open) closeLB(); else openLB(); }
   else if (k === 'KeyR' && RACE_ON && !raceOn() && !race.panel) openRace();
+  else if (k === 'KeyK') { if (skinsUI.open) closeSkins(); else openSkins(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
@@ -2990,7 +3182,7 @@ screen.addEventListener('pointerdown', e => {
   audioInit();
   const r = screen.getBoundingClientRect();
   const atEdge = visH - e.clientY < EDGE_PX;
-  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || notesPage >= 0)) {
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
@@ -3021,6 +3213,7 @@ function handleTap(cx, cy) {
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   if (race.panel) return;
   if (a2hs.open) { const q = a2hs.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeA2HS(); return; }
+  if (skinsUI.open) { const q = skinsUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSkins(); return; }
   flap('click');
 }
 if (TOUCH) {
@@ -3085,6 +3278,7 @@ if (LB_ON) {
   if (!player.bestSynced) { player.bestSynced = true; if (best > 0) player.pending = Math.max(player.pending, best); save(); }
   lbFlush(); lbLoad(); addEventListener('online', () => { lbFlush(); lbLoad(); });
 }
+checkSkins(true);   // retroactive unlocks (e.g. from your best score), quietly; a NEW badge shows on SKINS
 reset(); fade = 0;
 requestAnimationFrame(loop);
 </script>
