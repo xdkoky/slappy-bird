@@ -734,6 +734,106 @@ function slotBirdExtra(x, f, t) {
   }
   for (let i = 4; i <= 11; i++) P(i, 10, '#f8c81c');                                     // gold trim
 }
+
+// ============================================================ trails
+// A trail streams out behind the bird and goes with any skin. They unlock with long lifetime goals
+// (much harder than skins). The glowing ones also light up the world around them.
+const TRAILS = [
+  { id: 'none',      name: 'NO TRAIL',   reqs: () => [] },
+  { id: 'feathers',  name: 'FEATHERS',   reqs: () => [['PASS 1000 PIPES', stats.pipes || 0, 1000]] },
+  { id: 'bubbles',   name: 'BUBBLES',    reqs: () => [['COLLECT 2000 COINS', stats.coins || 0, 2000]] },
+  { id: 'hearts',    name: 'HEARTS',     reqs: () => [['A 14 DAY STREAK', stats.bestStreak || 0, 14]] },
+  { id: 'fire',      name: 'FIRE',       reqs: () => [['PARRY 250 FIREBALLS', stats.parries || 0, 250]] },
+  { id: 'stardust',  name: 'STARDUST',   reqs: () => [['HIT 10 JACKPOTS', stats.revives || 0, 10]] },
+  { id: 'lightning', name: 'LIGHTNING',  reqs: () => [['BEAT 50 BOSSES', stats.bosses || 0, 50]] },
+  { id: 'rainbow',   name: 'RAINBOW',    reqs: () => [['SCORE 100 IN ONE RUN', best, 100]] },
+  { id: 'void',      name: 'VOID',       reqs: () => { const o = TRAILS.filter(t => !['none', 'void', 'dev'].includes(t.id));
+      return [['ALL ' + o.length + ' OTHER TRAILS', o.filter(t => hasTrail(t.id)).length, o.length], ['SCORE 150 IN ONE RUN', best, 150]]; } },
+  { id: 'dev',       name: 'DEV GLITCH', dev: true, reqs: () => [['ONLY THE DEV HAS THIS ONE', player.isDev ? 1 : 0, 1]] },
+];
+// light per glowing trail: radius, strength, colour (or a function for colour-cycling ones)
+const TRAIL_LIGHT = {
+  fire:      { r: 48, k: 0.38, c: [1, 0.5, 0.15] },
+  lightning: { r: 44, k: 0.4,  c: [0.45, 0.8, 1], flicker: true },
+  stardust:  { r: 38, k: 0.3,  c: [1, 0.84, 0.3] },
+  void:      { r: 50, k: 0.32, c: [0.7, 0.2, 1] },
+  dev:       { r: 42, k: 0.3,  c: () => hslRGB((tick * 6) % 360) },
+};
+const trailById = id => TRAILS.find(t => t.id === id) || TRAILS[0];
+const hasTrail = id => id === 'none' || (stats.trails || []).includes(id);
+const trailReady = t => t.reqs().every(([, a, b]) => a >= b);
+const equippedTrail = () => hasTrail(stats.trail) ? stats.trail : 'none';
+const isNewTrail = id => (stats.newTrails || []).includes(id);
+function seenTrail(id) { if (isNewTrail(id)) { stats.newTrails = stats.newTrails.filter(x => x !== id); saveStats(); } }
+function hslRGB(h) { const f = n => { const k = (n + h / 30) % 12; return 0.5 - 0.5 * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0), f(8), f(4)]; }
+const HEART_COLS = ['#f83850', '#ff6a9a', '#ff9ac0'], RAINBOW_COLS = ['#f83850', '#ff9a30', '#ffe14d', '#7fe05a', '#30a8ff', '#9a5af0'];
+let trail = [];
+function spawnTrail(id, bx, by, list, n) {   // n: frame counter, for spawn rates
+  const add = o => list.push(Object.assign({ x: bx, y: by, vx: 0, vy: 0, t: 0, life: 30 }, o));
+  if (id === 'feathers' && n % 3 === 0) add({ y: by + rand(-5, 5), vx: rand(-0.6, -0.2), vy: rand(-0.2, 0.4), life: 70, ph: rand(0, 6) });
+  if (id === 'bubbles' && n % 6 === 0) add({ y: by + rand(-4, 4), vx: rand(-0.3, 0), vy: -0.35, life: 70, r: rand(2, 5) | 0, ph: rand(0, 6) });
+  if (id === 'hearts' && n % 8 === 0) add({ y: by + rand(-4, 4), vx: rand(-0.4, 0), vy: -0.5, life: 60, c: HEART_COLS[n % 3] });
+  if (id === 'rainbow') add({ x: bx + 2, life: 46 });
+  if (id === 'fire') for (let i = 0; i < 2; i++) add({ x: bx + rand(-2, 2), y: by + rand(-3, 3), vx: rand(-0.8, -0.2), vy: rand(-0.6, -0.1), life: rand(14, 24) | 0, s: rand(3, 6) });
+  if (id === 'lightning') { add({ y: by + rand(-7, 7), life: 24, bolt: true }); if (n % 5 === 0) add({ y: by + rand(-10, 10), vx: rand(-1.5, -0.5), vy: rand(-1, 1), life: 10 }); }
+  if (id === 'stardust' && n % 3 === 0) add({ x: bx + rand(-4, 2), y: by + rand(-8, 8), vx: rand(-0.5, 0), vy: rand(-0.2, 0.2), life: rand(30, 50) | 0, ph: rand(0, 6) });
+  if (id === 'void' && n % 2 === 0) add({ y: by + rand(-3, 3), vx: rand(-0.4, 0), vy: rand(-0.2, 0.2), life: 40, r: rand(3, 5) });
+  if (id === 'dev') for (let i = 0; i < 2; i++) add({ y: by + rand(-6, 6), vx: rand(-0.6, 0), life: 30, h: (n * 9 + i * 120) % 360, s: rand(2, 4) | 0 });
+}
+function stepTrail(list, drift) {
+  for (const q of list) { q.x += q.vx - drift; q.y += q.vy; q.t++; }
+  return list.filter(q => q.t < q.life && q.x > -30);
+}
+function updateTrail(sp) {   // called every frame: the world scrolls past, so the trail streams out behind
+  const id = equippedTrail(), on = id !== 'none' && (state === 'ready' || state === 'play' || state === 'revive');
+  const drift = (state === 'ready' || (state === 'play' && hover <= 0)) ? sp : 0.6;
+  if (on && !(bird.inv > 0 && (tick >> 2) & 1 && state === 'play')) spawnTrail(id, BIRD_X - 12, bird.y + 2, trail, tick);
+  trail = stepTrail(trail, drift);
+  if (trail.length > 180) trail.splice(0, trail.length - 180);
+}
+function drawTrailParts(id, list) {
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); };
+  if (id === 'lightning') {                          // a jagged bolt through the newest points, flickering
+    const pts = list.filter(q => q.bolt);
+    if (Math.random() < 0.85) for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], fade = 1 - a.t / a.life;
+      g.globalAlpha = fade; g.strokeStyle = '#4ab8ff'; g.lineWidth = 3; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+      g.strokeStyle = '#fff'; g.lineWidth = 1; g.stroke();
+    }
+    g.globalAlpha = 1;
+    for (const q of list) if (!q.bolt) R(q.x, q.y, 2, 2, '#c8f0ff');
+    return;
+  }
+  for (const q of list) {
+    const k = q.t / q.life, fade = Math.min(1, (q.life - q.t) / 10);
+    g.globalAlpha = fade;
+    if (id === 'feathers') {                       // a little white feather, see-sawing as it drifts
+      const sx = Math.sin(q.t * 0.15 + q.ph) * 2, fx = q.x + sx, tilt = Math.sin(q.t * 0.15 + q.ph) > 0 ? 1 : 0;
+      R(fx, q.y + tilt, 7, 2, '#ffffff'); R(fx + 1, q.y + 2 - tilt, 5, 1, '#d8d0b8'); R(fx - 2, q.y + 1, 2, 1, '#a89868');
+    }
+    else if (id === 'bubbles') { const bx = q.x + Math.sin(q.t * 0.12 + q.ph) * 2; pring(Math.round(bx), Math.round(q.y), q.r + 1, '#bfefff'); R(bx - q.r / 2, q.y - q.r / 2, 1, 1, '#fff'); }
+    else if (id === 'hearts') g.drawImage(heartFull, Math.round(q.x - 5), Math.round(q.y - 5), 10, 10);
+    else if (id === 'rainbow') { const wv = ((q.t >> 3) & 1) * 2; RAINBOW_COLS.forEach((c, i) => R(q.x, q.y - 6 + i * 2 + wv, 4, 2, c)); }
+    else if (id === 'fire') { const sz = Math.max(1, Math.round(q.s * (1 - k * 0.6))); R(q.x - sz / 2, q.y - sz / 2, sz, sz, k < 0.25 ? '#fff4a0' : k < 0.5 ? '#ffc040' : k < 0.75 ? '#ff6a20' : '#a02010'); }
+    else if (id === 'stardust') { const tw = Math.sin(q.t * 0.4 + q.ph) > 0 ? 3 : 1; R(q.x - 1, q.y - 1, 2, 2, '#fff'); R(q.x - tw - 1, q.y, tw * 2 + 2, 1, '#ffe14d'); R(q.x, q.y - tw - 1, 1, tw * 2 + 2, '#ffe14d'); }
+    else if (id === 'void') { g.globalAlpha = fade * 0.75 * (1 - k * 0.5); pcircle(Math.round(q.x), Math.round(q.y), Math.round(q.r + q.t * 0.12), k < 0.3 ? '#4c1880' : '#2a0c48'); if ((q.t & 7) === 0) { g.globalAlpha = fade; R(q.x, q.y, 2, 2, '#c060ff'); } }
+    else if (id === 'dev') { const gx = Math.random() < 0.08 ? rand(-6, 6) : 0; R(q.x + gx, q.y, q.s, q.s, `hsl(${(q.h + q.t * 12) % 360},100%,60%)`); }
+  }
+  g.globalAlpha = 1;
+}
+const trailIcons = new Map();    // a short, fixed sample of each trail for the menu
+function trailSample(id) {
+  let c = trailIcons.get(id); if (c) return c;
+  const mr = Math.random, rnd = seeded('trail-' + id); Math.random = rnd;
+  let list = [];
+  try { for (let n = 0; n < 60; n++) { spawnTrail(id, 0, Math.sin(n * 0.18) * 4, list, n); list = stepTrail(list, 0.9); } }
+  finally { Math.random = mr; }
+  trailIcons.set(id, list); return list;
+}
+function drawTrailIcon(id, cx, cy, clip) {   // trail sample plus the equipped bird, inside a clip box
+  g.save(); g.beginPath(); g.rect(clip.x, clip.y, clip.w, clip.h); g.clip();
+  g.translate(cx + 6, cy); drawTrailParts(id, trailSample(id)); g.restore();
+}
 const hasSkin = id => stats.skins.includes(id);
 // Requirements as [label, have, need] lines. Base skins have one; mastery skins have several.
 const skinReqs = k => {
@@ -756,6 +856,10 @@ function checkSkins(silent) {
   for (const k of SKINS) if (!hasSkin(k.id) && (!k.race || RACE_ON) && skinReady(k)) {
     stats.skins.push(k.id); stats.newSkins = [...(stats.newSkins || []), k.id]; statsDirty = true;   // NEW tag until viewed
     if (!silent || k.id === 'classic' || k.id === 'homebody') { toasts.push({ id: k.id, t: 0 }); sfx('token'); }   // the secret always gets its moment
+  }
+  for (const t of TRAILS) if (!hasTrail(t.id) && trailReady(t)) {
+    stats.trails = [...(stats.trails || []), t.id]; stats.newTrails = [...(stats.newTrails || []), t.id]; statsDirty = true;
+    if (!silent) { toasts.push({ kind: 'trail', id: t.id, t: 0 }); sfx('token'); }
   }
   if (statsDirty) { statsDirty = false; saveStats(); }
 }
@@ -870,9 +974,13 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 16;
-const BUILD = '1012-22';   // bump with sw.js VERSION on every update (shown in settings)
+const NOTES_VERSION = 17;
+const BUILD = '1012-23';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
+  { v: 17, title: 'TRAILS', items: [
+    { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
+    { h: 'FOR THE BEST ONLY', col: '#d8283c', t: 'THEY ARE HARD TO GET. CHECK SKINS AND THEN TRAILS. SOME OF THEM GLOW!' },
+  ] },
   { v: 16, title: 'DAILY', items: [
     { h: 'DAILY WORD', col: '#7a60e0', t: 'FIND THE LETTERS OF THE DAY IN THE PIPE GAPS AND SPELL THE WORD FOR TOKENS!' },
     { h: 'MISSIONS AND STREAKS', col: '#e86a17', t: 'THREE NEW MISSIONS EVERY DAY AND A REWARD FOR EVERY DAY IN A ROW. TAP DAILY!' },
@@ -1693,6 +1801,7 @@ function updateShots() {
 
 function updateFX() {
   updateConfetti();
+  updateTrail(hover > 0 || hitstop > 0 ? 0 : speed());
   checkGoals();
   for (const p of popups) { p.y += p.vy; p.life--; }
   popups = popups.filter(p => p.life > 0);
@@ -2299,29 +2408,96 @@ function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side b
 
 
 // ============================================================ skins screen
-const skinsUI = { open: false, sel: null, rect: null };
+const skinsUI = { open: false, sel: null, rect: null, tab: 'birds', tsel: null };
 function openSkins() {
   if (!settingsAllowed()) return;
   const fresh = (stats.newSkins || []).filter(hasSkin);
   skinsUI.open = true; skinsUI.sel = fresh.length ? fresh[fresh.length - 1] : equipped().id;   // jump to the newest unlock
+  const ft = (stats.newTrails || []).filter(hasTrail);                                           // only new trails: open on them
+  skinsUI.tab = ft.length && !fresh.length ? 'trails' : 'birds'; skinsUI.tsel = ft.length ? ft[ft.length - 1] : equippedTrail();
   stats.fresh = 0; saveStats(); notesPage = -1; sfx('blip', true);
 }
 const isNewSkin = id => (stats.newSkins || []).includes(id);
 function seenSkin(id) { if (isNewSkin(id)) { stats.newSkins = stats.newSkins.filter(x => x !== id); saveStats(); } }
 function closeSkins() { skinsUI.open = false; sfx('blip', false); }
 const TIER_COL = { secret: '#ffd23f', base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
-function drawSkins() {
-  const list = SKINS.filter(k => !k.race || RACE_ON);
-  const cols = wide ? 6 : list.length > 20 ? 5 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
-  const rows = Math.ceil(list.length / cols), h = 54 + rows * ch + 236;
+function skinsTabs(x, y, w) {
+  const tw2 = Math.round((w - 36) / 2), nb = (stats.newTrails || []).filter(hasTrail).length;
+  button(x + 14, y, tw2, 26, 'BIRDS', () => { if (skinsUI.tab !== 'birds') { skinsUI.tab = 'birds'; sfx('blip', true); } }, true, skinsUI.tab !== 'trails' ? 'on' : 'off');
+  button(x + w - 14 - tw2, y, tw2, 26, 'TRAILS', () => { if (skinsUI.tab !== 'trails') { skinsUI.tab = 'trails'; skinsUI.tsel = skinsUI.tsel || equippedTrail(); sfx('blip', true); } }, true, skinsUI.tab === 'trails' ? 'on' : 'off');
+  if (nb && skinsUI.tab !== 'trails') { const bx = x + w - 20, by = y + 2; pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(nb, 9), bx + 1, by - 6, 2, '#fff', '#000', 0); }
+}
+function drawTrails() {
+  const list = TRAILS, cols = wide ? 6 : 5, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
+  const rows = Math.ceil(list.length / cols), h = 66 + rows * ch + 236;
   const y = clamp(Math.round((Math.min(LH, 600) - h) / 2), 6, Math.max(6, LH - h - 6));
   skinsUI.rect = { x, y, w, h };
   buttons = [];
   g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
   drawPanel(x, y, w, h);
-  text('SKINS', LW / 2, y + 10, 3, '#fff', '#543847', 2);
-  text(stats.skins.filter(id => list.some(k => k.id === id)).length + ' / ' + list.length + ' UNLOCKED', LW / 2, y + 36, 2, '#8a7438', '#000', 0);
-  const gx = x + Math.round((w - cols * cw) / 2), gy = y + 54;
+  text('SKINS', LW / 2, y + 8, 3, '#fff', '#543847', 2);
+  skinsTabs(x, y + 34, w);
+  const gx = x + Math.round((w - cols * cw) / 2), gy = y + 66, eq = equippedTrail(), sel = skinsUI.tsel || eq;
+  list.forEach((t, i) => {
+    const cx = gx + (i % cols) * cw, cy = gy + Math.floor(i / cols) * ch, have = hasTrail(t.id);
+    g.fillStyle = '#543847'; g.fillRect(cx + 2, cy + 2, cw - 4, ch - 4);
+    g.fillStyle = have ? '#3a2a48' : '#7a6e80'; g.fillRect(cx + 4, cy + 4, cw - 8, ch - 8);   // dark, so glowing trails show
+    g.fillStyle = t.dev ? '#ff5cc8' : '#9a5af0'; g.fillRect(cx + 4, cy + ch - 8, cw - 8, 4);
+    const bx = cx + (cw >> 1), by = cy + 19;
+    if (have) {
+      if (t.id === 'none') text('OFF', cx + 8, by - 3, 1, '#c8bcd0', '#000', 0, 'l');
+      else drawTrailIcon(t.id, bx + 4, by, { x: cx + 4, y: cy + 4, w: cw - 8, h: ch - 12 });
+      g.drawImage(skinFrame(equipped().id, 1), bx + 2, by - 8, 22, 16);
+    } else {
+      g.fillStyle = '#2a2030'; g.fillRect(bx - 6, by - 2, 12, 9); g.fillRect(bx - 4, by - 7, 2, 5); g.fillRect(bx + 2, by - 7, 2, 5); g.fillRect(bx - 4, by - 8, 8, 2);
+      g.fillStyle = '#9a8ea8'; g.fillRect(bx - 1, by + 1, 2, 3);
+    }
+    const frame = (c) => { g.fillStyle = c; for (const [ox, oy, ow, oh] of [[0, 0, cw, 2], [0, ch - 2, cw, 2], [0, 0, 2, ch], [cw - 2, 0, 2, ch]]) g.fillRect(cx + ox, cy + oy, ow, oh); };
+    if (eq === t.id) frame('#e86a17'); else if (sel === t.id) frame('#fff');
+    if (have && isNewTrail(t.id)) {
+      const tx = cx + cw - 30, ty = cy - 3; g.fillStyle = '#543847'; g.fillRect(tx, ty, 30, 14);
+      g.fillStyle = (tick >> 4) & 1 ? '#ff4a5e' : '#e8302a'; g.fillRect(tx + 2, ty + 2, 26, 10); text('NEW', tx + 15, ty + 3, 1, '#fff', '#000', 0);
+    }
+    buttons.push({ x: cx, y: cy, w: cw, h: ch, act: () => { skinsUI.tsel = t.id; seenTrail(t.id); sfx('blip', true); } });
+  });
+  const t = trailById(sel), have = hasTrail(t.id), dy = gy + rows * ch + 8;
+  g.fillStyle = '#c9b968'; g.fillRect(x + 10, dy - 4, w - 20, 2);
+  text(t.name, x + 14, dy + 4, 2, '#8a3ad0', '#000', 0, 'l');
+  text(t.dev ? 'DEV ONLY' : t.id === 'none' ? '' : 'TRAIL', x + w - 14, dy + 4, 2, '#8a7438', '#000', 0, 'r');
+  let ly = dy + 26;
+  const maxc = Math.floor((w - 28 + 2) / 12);
+  if (t.id === 'none') { text('JUST THE BIRD.', x + 14, ly, 2, '#8a7438', '#000', 0, 'l'); ly += 18; }
+  else text(TRAIL_LIGHT[t.id] ? 'GLOWS IN THE DARK' : '', x + 14, dy + 22, 1, '#8a3ad0', '#000', 0, 'l');
+  if (t.id !== 'none') ly += 8;
+  for (const [label, a, b] of t.reqs()) {
+    const done = have || a >= b;
+    for (const l of wrapText(label, maxc)) { text(l, x + 14, ly, 2, done ? '#1f7a30' : '#8a7438', '#000', 0, 'l'); ly += 18; }
+    if (!t.dev) {
+      const cnt = done ? 'DONE' : Math.min(a, b) + '/' + b, bw = w - 28 - tw(cnt) - 10, pk = done ? 1 : clamp(a / b, 0, 1);
+      g.fillStyle = '#543847'; g.fillRect(x + 14, ly + 2, bw, 8); g.fillStyle = '#e8dcb0'; g.fillRect(x + 16, ly + 4, bw - 4, 4);
+      g.fillStyle = done ? '#7fe05a' : '#9a5af0'; g.fillRect(x + 16, ly + 4, Math.round((bw - 4) * pk), 4);
+      text(cnt, x + w - 14, ly - 2, 2, done ? '#1f7a30' : '#543847', '#000', 0, 'r');
+      ly += 18;
+    }
+    ly += 4;
+  }
+  const eqd = eq === t.id;
+  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.trail = t.id; trail = []; seenTrail(t.id); saveStats(); sfx('coin'); } }, have && !eqd);
+  button(x + w - 14 - 100, y + h - 42, 100, 30, 'DONE', closeSkins);
+}
+function drawSkins() {
+  if (skinsUI.tab === 'trails') return drawTrails();
+  const list = SKINS.filter(k => !k.race || RACE_ON);
+  const cols = wide ? 6 : list.length > 20 ? 5 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
+  const rows = Math.ceil(list.length / cols), h = 66 + rows * ch + 236;
+  const y = clamp(Math.round((Math.min(LH, 600) - h) / 2), 6, Math.max(6, LH - h - 6));
+  skinsUI.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('SKINS', LW / 2, y + 8, 3, '#fff', '#543847', 2);
+  skinsTabs(x, y + 34, w);
+  const gx = x + Math.round((w - cols * cw) / 2), gy = y + 66;
   list.forEach((k, i) => {
     const cx = gx + (i % cols) * cw, cy = gy + Math.floor(i / cols) * ch, have = hasSkin(k.id);
     const isEq = equipped().id === k.id, isSel = skinsUI.sel === k.id;
@@ -2384,7 +2560,7 @@ function birdShadow() {           // dark silhouette for locked skins (made once
   return birdShadowC = c;
 }
 function skinsButtonBadge() {     // red NEW dot on the SKINS button
-  const n = (stats.newSkins || []).filter(hasSkin).length || stats.fresh || 0;
+  const n = (stats.newSkins || []).filter(hasSkin).length + (stats.newTrails || []).filter(hasTrail).length || stats.fresh || 0;
   const b = buttons.find(b => b.label === 'SKINS'); if (!b || !n) return;
   const bx = b.x + b.w - 10, by = b.y + 4;
   pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(n, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
@@ -2611,11 +2787,17 @@ function drawDaily() {
 
 function drawToasts() {           // "NEW SKIN!" / "MISSION DONE!" cards sliding in at the top
   toasts.slice(0, 1).forEach(tt => {
-    const k = tt.kind ? null : skinById(tt.id), e = Math.min(1, tt.t / 12, (170 - tt.t) / 14);
-    const w = Math.max(tw(k ? k.name : tt.sub) + 70, 190), x = Math.round((LW - w) / 2);
+    const k = tt.kind ? null : skinById(tt.id), tr = tt.kind === 'trail' ? trailById(tt.id) : null, e = Math.min(1, tt.t / 12, (170 - tt.t) / 14);
+    const w = Math.max(tw(k ? k.name : tr ? tr.name : tt.sub) + 70, 190), x = Math.round((LW - w) / 2);
     const live = state === 'play' || state === 'dying' || state === 'revive';   // in a run: below the score; otherwise above the menus
     const y0 = live ? (wide ? 90 : 82) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) : (wide ? 18 : 12), y = Math.round(-60 + e * (y0 + 60));
     drawPanel(x, y, w, 44);
+    if (tr) {
+      drawTrailIcon(tr.id, x + 24, y + 22, { x: x + 4, y: y + 4, w: 36, h: 36 });
+      text('NEW TRAIL!', x + 52, y + 6, 2, '#8a3ad0', '#000', 0, 'l');
+      text(tr.name, x + 52, y + 24, 2, '#543847', '#000', 0, 'l');
+      return;
+    }
     if (!k) {
       g.drawImage(tokenSmall, x + 12, y + 8, 28, 28);
       text(tt.title, x + 52, y + 6, 2, '#8a3ad0', '#000', 0, 'l');
@@ -3394,6 +3576,7 @@ function draw() {
     if (bossesBeaten === 0 && parries < 3) text(ACT + ' NOW!', BIRD_X, bird.y - 44, 2, '#fff', '#c2310c');
   }
 
+  if (trail.length) drawTrailParts(equippedTrail(), trail);
   // feathers + bird
   g.fillStyle = '#fdf6c4';
   for (const f of feathers) g.fillRect(Math.round(f.x / 2) * 2, Math.round(f.y / 2) * 2, 4, 2);
@@ -3560,7 +3743,7 @@ function addLight(x, y, r, k, rgb) {
 }
 function gatherLights() {
   lightN = 0;
-  if (notesPage >= 0 || settingsOpen) return;   // menus sit on top of the world, keep glows off them
+  if (notesPage >= 0 || settingsOpen || skinsUI.open || dailyUI.open || lb.open || a2hs.open || race.panel) return;   // menus sit on top of the world, keep glows off them
   const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 90);
   for (const b of booms) if (b.t >= 0) {                                  // explosions flare hot, then fade
     const k = 1 - b.t / b.life;
@@ -3599,6 +3782,15 @@ function gatherLights() {
       addLight(s.cx - 80 * z, s.cy - 84 * z, 60, (on ? 0.6 : 0.2) * fade, [1, 0.85, 0.4]);
       addLight(s.cx + 80 * z, s.cy - 84 * z, 60, (on ? 0.2 : 0.6) * fade, [1, 0.85, 0.4]);
       for (const f of s.flares) { const e = 1 - f.t / 24; addLight(f.x, f.y, 70 + 40 * (1 - e), 1.1 * e * e * fade, f.rgb); }
+    }
+  }
+  const TL = TRAIL_LIGHT[equippedTrail()];                              // glowing trails: a few lights along the stream
+  if (TL && trail.length && state !== 'over') {
+    const pts = equippedTrail() === 'lightning' ? trail.filter(q => q.bolt) : trail;
+    for (const f of [1, 0.6, 0.25]) {
+      const q = pts[Math.min(pts.length - 1, Math.floor(pts.length * f))]; if (!q) continue;
+      const fl = TL.flicker ? (Math.random() < 0.25 ? 0.3 : 1) : 1;
+      addLight(q.x, q.y, TL.r * (0.7 + 0.3 * f), TL.k * f * fl * Math.min(1, (q.life - q.t) / 10), typeof TL.c === 'function' ? TL.c() : TL.c);
     }
   }
   const sk = equipped();                                                // glowing skins light up their surroundings
