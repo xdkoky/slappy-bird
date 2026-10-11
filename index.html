@@ -867,7 +867,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 15;
-const BUILD = '1012-17';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-18';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 15, title: 'HOMEBODY', items: [
     { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
@@ -1065,7 +1065,49 @@ function setPaused(v) {
 }
 // Called away (phone call, app switch, notification centre, screen lock...): pause instead of losing the
 // run. The slot machine pauses too, so its CONTINUE? countdown can't run out while you're on the phone.
-function autoPause() { setPaused(true); }   // (also re-pauses during the 3-2-1 countdown)
+function autoPause() { setPaused(true); saveRun(); }   // (also re-pauses during the 3-2-1 countdown)
+
+// ------------------------------------------------------------ surviving the app being closed
+// iOS often throws a backgrounded Home Screen app away, and players swipe it closed. So whenever the
+// game is left, the run is written down, and the next launch puts it back exactly there, paused.
+// (Boss fights restart from the boss's entrance; races can't be resumed.)
+const RUN_KEY = 'slappy-run';
+function saveRun() {
+  try {
+    if (raceOn() || !['play', 'dying', 'slot', 'revive'].includes(state)) { localStorage.removeItem(RUN_KEY); return; }
+    const live = pipes.slice();
+    const r = { v: 1, at: Date.now(), state, score, spawned, passedPipes, nextBossAt, bossesBeaten, hearts, combo, parries, halo, groundX, bgX,
+      bossPending: bossPending || !!boss, shownNew, goals, bird: { y: bird.y, inv: bird.inv },
+      pipes: boss ? [] : live, coins: boss ? [] : coins.filter(c => !c.pipe || live.includes(c.pipe)).map(c => Object.assign({}, c, { pipe: c.pipe ? live.indexOf(c.pipe) : -1 })) };
+    if (state === 'slot' && slot) r.slot = { phase: slot.phase, out: slot.out, paid: slot.paid };
+    localStorage.setItem(RUN_KEY, JSON.stringify(r));
+  } catch {}
+}
+function clearRun() { try { localStorage.removeItem(RUN_KEY); } catch {} }
+function loadRun() {
+  let r; try { r = JSON.parse(localStorage.getItem(RUN_KEY) || 'null'); localStorage.removeItem(RUN_KEY); } catch { return; }
+  if (!r || r.v !== 1 || Date.now() - r.at > 7 * 864e5) return;
+  reset(); fade = 0;
+  ({ score, spawned, passedPipes, nextBossAt, bossesBeaten, hearts, combo, parries, halo, groundX, bgX, bossPending } = r);
+  shownNew = r.shownNew || {}; goals = r.goals || [];
+  pipes = r.pipes || [];
+  coins = (r.coins || []).map(c => Object.assign(c, { pipe: c.pipe >= 0 ? pipes[c.pipe] : null })).filter(c => c.token || c.pipe);
+  bird.y = r.bird.y; bird.inv = r.bird.inv || 0; bird.vy = 0; bird.rot = 0;
+  const revived = () => {                 // back in the air with the pipes around the bird cleared
+    pipes = pipes.filter(p => p.x > BIRD_X + 160 || p.x + 52 < BIRD_X - 40);
+    coins = coins.filter(c => !c.pipe || pipes.includes(c.pipe));
+    bird.y = clamp(bird.y, 130, 290); bird.inv = 150; hearts = 3; state = 'play';
+  };
+  const sl = r.slot, jackpot = sl && sl.out && sl.out.every(o => o === 'heart') && (sl.phase === 'spin' || sl.phase === 'jackpot');
+  if (r.state === 'revive' || jackpot) revived();
+  else if (r.state === 'slot' || r.state === 'dying') {
+    if (sl && sl.phase === 'spin') { if (sl.paid === 'token') tokens++; else bank += COINS_PER_SPIN; }   // the spin never finished: refund it
+    state = 'play'; downed();              // back to the CONTINUE? screen (or game over if there's nothing to spin with)
+    if (state === 'slot') { slot.t = 31; paused = true; resumeT = 0; }
+    return;
+  } else state = 'play';
+  paused = true; resumeT = 0;
+}
 function countdownStep() {   // one 60Hz frame of the resume countdown
   if (--resumeT <= 0) { resumeT = 0; paused = false; sfx('blip', true); }
   else if (resumeT % COUNT_STEP === 0) sfx('tick');
@@ -1297,11 +1339,12 @@ function downed() {
     state = 'slot';
     slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0, zoom: 0, resT: 0, flares: [],
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
-  } else { state = 'over'; overT = 0; lbSubmit(score); statAdd('runs'); checkSkins(); }
+  } else { clearRun(); state = 'over'; overT = 0; lbSubmit(score); statAdd('runs'); checkSkins(); }
 }
 function spin() {
   const s = slot;
   if (s.phase === 'spin' || s.phase === 'jackpot' || !canSpin()) return;
+  s.paid = tokens > 0 ? 'token' : 'coins';
   if (tokens > 0) tokens--; else bank -= COINS_PER_SPIN;
   save(); s.spins++;
   s.out = rollOutcome(); s.phase = 'spin'; s.msg = ''; s.res = ''; s.pull = 0;
@@ -1363,7 +1406,7 @@ function resolveSpin() {
   }
   if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
-function giveUp() { stopDrum(); state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
+function giveUp() { stopDrum(); clearRun(); state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
 
 // ------------------------------------------------------------ revive
 // A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
@@ -3493,6 +3536,7 @@ if (LB_ON) {
 }
 checkSkins(true);   // retroactive unlocks (e.g. from your best score), quietly; a NEW badge shows on SKINS
 reset(); fade = 0;
+loadRun();          // a run that was interrupted by the app being closed
 requestAnimationFrame(loop);
 </script>
 </body>
