@@ -975,9 +975,13 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 17;
-const BUILD = '1012-28';   // bump with sw.js VERSION on every update (shown in settings)
+const NOTES_VERSION = 18;
+const BUILD = '1012-29';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
+  { v: 18, title: 'FRIENDS', items: [
+    { h: 'ADD YOUR FRIENDS', col: '#3a90d8', t: 'SHARE YOUR FRIEND CODE OR TAP A NAME ON THE LEADERBOARD. THEY HAVE TO ACCEPT.' },
+    { h: 'ONE TAP 1V1', col: '#c2310c', t: 'SEE WHO IS ONLINE AND CHALLENGE THEM TO A RACE. EVERY WIN COUNTS!' },
+  ] },
   { v: 17, title: 'TRAILS', items: [
     { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
     { h: 'FOR THE BEST ONLY', col: '#d8283c', t: 'THEY ARE HARD TO GET. CHECK SKINS AND THEN TRAILS. SOME OF THEM GLOW!' },
@@ -1247,6 +1251,8 @@ function flap(src) {
   if (a2hs.open) { if (src !== 'slap') closeA2HS(); return; }
   if (skinsUI.open) { if (src !== 'slap') closeSkins(); return; }
   if (dailyUI.open) { if (src !== 'slap') closeDaily(); return; }
+  if (fr.open) { if (src !== 'slap') closeFriends(); return; }
+  if (inviteShown()) return;
   if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') { if (src !== 'slap') closeNotes(); return; } notesPage = -1; }
@@ -2078,7 +2084,7 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // ============================================================ settings menu
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
-const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && !skinsUI.open && !dailyUI.open && (state === 'ready' || (state === 'over' && overT > 50));
+const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && !skinsUI.open && !dailyUI.open && !fr.open && !fr.invite && (state === 'ready' || (state === 'over' && overT > 50));
 function openSettings() { if (!settingsAllowed()) return; a2hs.open = false; skinsUI.open = false; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
@@ -2181,7 +2187,7 @@ function raceMsg(ev, d) {
     else { o.name = cleanName(d.name) || o.name; o.left = false; }
     race.opp.skin = SKINS.some(k => k.id === d.skin) ? d.skin : null;
     if (ev === 'hello') raceSend('hi', { name: player.name, role: race.role, skin: equipped().id });
-    if (!o) sfx('blip', true);
+    if (!o) { sfx('blip', true); if (race.auto && race.role === 'host' && race.phase === 'off') setTimeout(raceHostStart, 900); }   // challenge: go
   } else if (!o) return;
   else if (ev === 'start' && race.role === 'guest') raceStart(d.seed);
   else if (ev === 'pos') { Object.assign(o, { d: d.d, y: d.y, r: d.r, s: d.s, recvAt: performance.now() }); }
@@ -2194,13 +2200,15 @@ function raceMsg(ev, d) {
 }
 
 // --- flow
-function openRace() { if (!RACE_ON || !settingsAllowed()) return; race.panel = 'lobby'; race.role = null; race.err = ''; notesPage = -1; sfx('blip', true); }
+function openRace() { if (!RACE_ON || !settingsAllowed()) return; race.panel = 'lobby'; race.role = null; race.err = ''; race.auto = false; race.invitee = null; notesPage = -1; sfx('blip', true); }
 function raceCreate() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZ'; let c = ''; for (let i = 0; i < 4; i++) c += A[Math.random() * A.length | 0];
   raceConnect(c, 'host');
 }
 function raceJoin(code) { code = String(code || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); if (code.length === 4) raceConnect(code, 'guest'); }
 function raceLeave() {
+  if (race.invitee && !race.opp) socialSend('uninvite', { to: race.invitee.id });
+  race.auto = false; race.invitee = null;
   raceDisconnect();
   Object.assign(race, { phase: 'off', panel: null, role: null, opp: null, err: '', result: null, myDone: false });
   reset(); fade = 0; sfx('blip', false);
@@ -2228,6 +2236,7 @@ function raceTick() {                                // called every simulation 
   } else if (race.phase === 'run' && !race.myDone && tick % 6 === 0)
     raceSend('pos', { d: Math.round(race.myDist), y: Math.round(bird.y), r: +bird.rot.toFixed(2), s: score });
   if (race.panel === 'lobby' && race.joined && !race.opp && performance.now() - race.helloT > 1500) raceHello();
+  if (race.panel === 'lobby' && race.invitee && !race.opp && !race.err && performance.now() - race.invT > 32000) race.err = 'NO ANSWER FROM ' + race.invitee.name;
   const o = race.opp;                                // a phone that went quiet mid-race has left
   if (o && race.phase === 'run' && !o.done && !o.left && performance.now() - o.recvAt > 6000) { o.left = true; raceCheckEnd(); }
 }
@@ -2244,13 +2253,192 @@ function raceCheckEnd() {
   if (!gone && !o.done) return;
   race.result = gone ? 'left' : race.myDist > o.d + 0.5 ? 'win' : race.myDist < o.d - 0.5 ? 'lose' : 'draw';
   race.panel = 'done';
-  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); statAdd('racesWon'); dq('race'); checkSkins(); }
+  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); statAdd('racesWon'); dq('race'); checkSkins();
+    if (race.result === 'win' && o && isFriend(o.id)) lbCall('race_won', frBody({ p_other: o.id })).then(frLoad).catch(() => {}); }
   else if (race.result === 'lose') sfx('lose');
 }
 function raceRematch() {
   if (race.readyMe) return;
   race.readyMe = true; raceSend('rematch'); sfx('blip', true);
   if (race.role === 'host' && race.opp && race.opp.ready) raceHostStart();
+}
+
+
+// ============================================================ friends
+// Friend codes and requests (they must be accepted) live in the database. While the game is open it
+// also sits in a shared realtime channel: that shows which friends are online right now and carries
+// race challenges ("invite" -> the friend accepts -> both phones join the same race room).
+const fr = { open: false, list: null, code: '', busy: false, t: 0, page: 0, sel: null, rect: null, noDb: false, reg: false,
+  online: new Set(), ws: null, joined: false, hb: 0, invite: null, note: '', noteT: 0 };
+const FR_PAGE = 6;
+const frBody = o => Object.assign({ p_id: player.id, p_secret: player.secret }, o);
+const isFriend = id => !!(fr.list && fr.list.some(f => f.id === id && f.status === 'ok'));
+function frLoad() {
+  if (!RACE_ON || fr.busy) return;
+  fr.busy = true;
+  const reg = fr.reg ? Promise.resolve() :   // make sure our row exists (a brand-new player may not have one yet)
+    lbCall('submit_score', frBody({ p_name: player.name, p_score: 0, p_skin: equipped().id })).then(n => { fr.reg = true; if (typeof n === 'string' && n) player.name = n; });
+  reg.then(() => Promise.all([
+    lbCall('friends_list', frBody({})).then(rows => { fr.list = rows || []; fr.t = performance.now(); fr.noDb = false; }),
+    fr.code ? null : lbCall('my_code', frBody({})).then(c => { if (typeof c === 'string') fr.code = c; }),
+  ]))
+    .catch(e => { if (e && e.status === 404) fr.noDb = true; if (!fr.list) fr.list = []; })
+    .finally(() => { fr.busy = false; });
+}
+function frNote(t) { fr.note = t; fr.noteT = performance.now(); }
+function frRequest(target) {   // -> promise of a message to show
+  return lbCall('friend_request', frBody({ p_target: target })).then(r => {
+    const [st, id] = String(r || '').split(' ');
+    if (id) socialSend('freq', { to: id });
+    frLoad();
+    return { sent: 'REQUEST SENT!', accepted: 'YOU ARE NOW FRIENDS!', already: 'ALREADY FRIENDS', pending: 'ALREADY ASKED',
+      self: 'THAT IS YOU!', notfound: 'NO PLAYER FOUND' }[st] || 'TRY AGAIN';
+  }).catch(e => e && e.status === 404 ? 'FRIENDS ARE NOT READY YET' : 'NO CONNECTION');
+}
+function frSet(f, accept) {
+  lbCall('friend_set', frBody({ p_other: f.id, p_accept: accept })).then(() => { socialSend('freq', { to: f.id }); frLoad(); }).catch(() => frNote('NO CONNECTION'));
+  if (accept) f.status = 'ok'; else fr.list = fr.list.filter(x => x !== f);   // show it straight away
+  fr.sel = null; sfx('blip', accept);
+}
+function openFriends() { if (!RACE_ON || !settingsAllowed()) return; fr.open = true; fr.page = 0; fr.sel = null; notesPage = -1; lb.open = false; frLoad(); socialConnect(); sfx('blip', true); }
+function closeFriends() { fr.open = false; sfx('blip', false); }
+function openFriendBox() {
+  if (nameBoxOpen) return;
+  nameBoxOpen = true; boxMode = 'friend'; sfx('blip', true);
+  const inp = nameInput();
+  Object.assign(nbox, { title: 'ADD A FRIEND', sub: 'TYPE THEIR FRIEND CODE OR THEIR NAME', ph: 'CODE OR NAME', msg: '', ok: 'ADD', cancel: 'CANCEL' });
+  inp.maxLength = 12; inp.value = ''; document.getElementById('namebox').style.display = 'block';
+  setTimeout(() => inp.focus(), 50);
+}
+
+// --- the shared channel: who's online, friend pings and race challenges
+const SOCIAL_TOPIC = 'realtime:slappy-social';
+function socialSend(event, payload = {}) {
+  const ws = fr.ws; if (!ws || ws.readyState !== 1 || !fr.joined) return;
+  ws.send(JSON.stringify({ topic: SOCIAL_TOPIC, event: 'broadcast', ref: null,
+    payload: { type: 'broadcast', event, payload: Object.assign({ from: player.id }, payload) } }));
+}
+function socialConnect() {
+  if (!RACE_ON || fr.ws || document.hidden) return;
+  let ws;
+  try { ws = new WebSocket(LB_URL.replace(/^http/, 'ws').replace(/\/$/, '') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(LB_KEY) + '&vsn=1.0.0'); }
+  catch { return; }
+  fr.ws = ws; let ref = 1;
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ topic: SOCIAL_TOPIC, event: 'phx_join', ref: String(ref++), join_ref: '1',
+      payload: { config: { broadcast: { self: false, ack: false }, presence: { key: player.id }, private: false } } }));
+    fr.hb = setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(ref++) })); }, 25000);
+  };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.topic !== SOCIAL_TOPIC) return;
+    if (m.event === 'phx_reply' && !fr.joined && m.payload && m.payload.status === 'ok') {
+      fr.joined = true;
+      ws.send(JSON.stringify({ topic: SOCIAL_TOPIC, event: 'presence', ref: String(ref++), payload: { type: 'presence', event: 'track', payload: { name: player.name } } }));
+    } else if (m.event === 'presence_state') fr.online = new Set(Object.keys(m.payload || {}));
+    else if (m.event === 'presence_diff') {
+      for (const k in (m.payload && m.payload.joins) || {}) fr.online.add(k);
+      for (const k in (m.payload && m.payload.leaves) || {}) fr.online.delete(k);
+    } else if (m.event === 'broadcast' && m.payload) socialMsg(m.payload.event, m.payload.payload || {});
+  };
+  ws.onclose = () => { if (fr.ws === ws) { fr.ws = null; fr.joined = false; clearInterval(fr.hb); fr.online = new Set(); setTimeout(socialConnect, 5000); } };
+}
+function socialDisconnect() { const ws = fr.ws; fr.ws = null; fr.joined = false; clearInterval(fr.hb); fr.online = new Set(); try { ws && ws.close(); } catch {} }
+function socialMsg(ev, d) {
+  if (d.to !== player.id) return;                   // everything here is addressed to one player
+  if (ev === 'freq') frLoad();
+  else if (ev === 'invite' && isFriend(d.from) && /^[A-Z]{4}$/.test(d.code || '')) {
+    fr.invite = { from: d.from, name: cleanName(d.name) || 'A FRIEND', skin: SKINS.some(k => k.id === d.skin) ? d.skin : 'rookie', code: d.code, t: performance.now() };
+    sfx('token');
+  } else if (ev === 'uninvite' && fr.invite && fr.invite.from === d.from) fr.invite = null;
+  else if (ev === 'decline' && race.invitee && race.invitee.id === d.from && !race.opp) race.err = race.invitee.name + ' SAID NO';
+}
+function challenge(f) {        // host a room and invite a friend into it
+  if (!fr.online.has(f.id)) return;
+  fr.open = false; race.panel = 'lobby'; raceCreate();
+  race.auto = true; race.invitee = { id: f.id, name: cleanName(f.name) || 'YOUR FRIEND' }; race.invT = performance.now();
+  const send = () => socialSend('invite', { to: f.id, name: player.name, skin: equipped().id, code: race.code });
+  send(); setTimeout(send, 1500);                    // once more, in case the first one raced the room opening
+  sfx('blip', true);
+}
+const inviteShown = () => !!(fr.invite && !raceOn() && !race.panel && !nameBoxOpen && (state === 'ready' || (state === 'over' && overT > 50)));
+function acceptInvite() {
+  const iv = fr.invite; fr.invite = null; if (!iv) return;
+  fr.open = false; settingsOpen = false; lb.open = false; skinsUI.open = false; dailyUI.open = false; notesPage = -1;
+  race.panel = 'lobby'; raceJoin(iv.code); race.auto = true; sfx('blip', true);
+}
+function declineInvite() { const iv = fr.invite; fr.invite = null; if (iv) socialSend('decline', { to: iv.from }); sfx('blip', false); }
+function friendsBadge() {
+  const n = (fr.list || []).filter(f => f.status === 'in').length, b = buttons.find(b => b.label === 'FRIENDS'); if (!b || !n) return;
+  const bx = b.x + b.w - 10, by = b.y + 4;
+  pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(n, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
+}
+
+function drawFriends() {
+  const w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), rowH = 40, h = 70 + FR_PAGE * rowH + 30 + 88;
+  const y = clamp(Math.round((Math.min(LH, 620) - h) / 2), 6, Math.max(6, LH - h - 6));
+  fr.rect = { x, y, w, h };
+  if (fr.open && performance.now() - fr.t > 30000) frLoad();
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('FRIENDS', LW / 2, y + 8, 3, '#fff', '#543847', 2);
+  text('MY CODE', x + 14, y + 42, 2, '#8a7438', '#000', 0, 'l');
+  text(fr.code || '...', x + 14 + tw('MY CODE') + 10, y + 42, 2, '#c2310c', '#000', 0, 'l');
+  button(x + w - 14 - 70, y + 36, 70, 26, 'ADD', openFriendBox);
+  const list = fr.list, ly0 = y + 70;
+  g.fillStyle = '#c9b968'; g.fillRect(x + 10, ly0 - 4, w - 20, 2);
+  const M = (t, yy, c = '#8a7438') => text(t, LW / 2, yy, 2, c, '#000', 0);
+  if (fr.noDb) { M('FRIENDS ARE', ly0 + 70); M('COMING VERY SOON!', ly0 + 92); }
+  else if (!list) M('LOADING...', ly0 + 80);
+  else if (!list.length) { M('NO FRIENDS YET', ly0 + 50, '#543847'); M('TAP ADD AND TYPE', ly0 + 84); M('THEIR FRIEND CODE', ly0 + 104); M('OR TAP A NAME ON', ly0 + 132); M('THE LEADERBOARD', ly0 + 152); }
+  else {
+    const pages = Math.ceil(list.length / FR_PAGE); fr.page = clamp(fr.page, 0, pages - 1);
+    list.slice(fr.page * FR_PAGE, fr.page * FR_PAGE + FR_PAGE).forEach((f, i) => {
+      const ry = ly0 + i * rowH, on = fr.online.has(f.id), nm = cleanName(f.name) || 'PLAYER', sel = fr.sel === f.id;
+      if (sel) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ry, w - 16, rowH - 4); }
+      if (f.status === 'ok') { pcircle(x + 15, ry + 17, 5, '#543847'); pcircle(x + 15, ry + 17, 3, on ? '#7fe05a' : '#a89878'); }
+      const sk = SKINS.some(k => k.id === f.skin) ? f.skin : 'rookie';
+      g.save(); g.translate(x + 38, ry + 16); g.rotate(-0.2); g.drawImage(skinFrame(sk, [0, 1, 2, 1][((tick >> 3) + i) % 4]), -13, -9, 26, 19); g.restore();
+      const bx = x + w - 14, bw0 = f.status === 'in' ? 82 : f.status === 'out' ? 34 : sel ? 92 : 56;
+      g.save(); g.beginPath(); g.rect(x + 54, ry, bx - bw0 - 6 - x - 54, rowH); g.clip();   // long names stop short of the buttons
+      text(nm, x + 54, ry + 6, 2, '#543847', '#000', 0, 'l');
+      const sub = f.status === 'in' ? 'WANTS TO BE FRIENDS' : f.status === 'out' ? 'REQUEST SENT' : (on ? 'ONLINE  ' : '') + 'YOU ' + f.wins + ' - ' + f.losses + ' THEM';
+      text(sub, x + 54, ry + 24, 1, f.status === 'in' ? '#c2310c' : on ? '#1f7a30' : '#8a7438', '#000', 0, 'l');
+      g.restore();
+      if (f.status === 'in') { button(bx - 82, ry + 4, 46, 28, 'YES', () => frSet(f, true)); button(bx - 32, ry + 4, 32, 28, 'NO', () => frSet(f, false), false); }
+      else if (f.status === 'out') button(bx - 34, ry + 4, 34, 28, 'X', () => frSet(f, false), false);
+      else if (sel) button(bx - 92, ry + 4, 92, 28, 'REMOVE', () => frSet(f, false), false);
+      else button(bx - 56, ry + 4, 56, 28, '1V1', () => { if (on) challenge(f); else frNote(nm + ' IS OFFLINE'); }, on);
+      if (f.status === 'ok') buttons.unshift({ x: x + 8, y: ry, w: bx - bw0 - 8 - x, h: rowH - 4, act: () => { fr.sel = sel ? null : f.id; sfx('blip', true); } });
+    });
+    if (pages > 1) {
+      const py = ly0 + FR_PAGE * rowH + 2;
+      button(x + 14, py, 40, 24, '<', () => { fr.page--; sfx('blip', true); }, fr.page > 0);
+      button(x + w - 54, py, 40, 24, '>', () => { fr.page++; sfx('blip', true); }, fr.page < pages - 1);
+      text((fr.page + 1) + ' / ' + pages, LW / 2, py + 6, 2, '#8a7438', '#000', 0);
+    }
+  }
+  const ny = y + h - 84;
+  if (fr.note && performance.now() - fr.noteT < 2500) text(fr.note, LW / 2, ny - 4, 2, '#c2310c', '#000', 0);
+  else text('TAP A FRIEND TO REMOVE THEM', LW / 2, ny - 2, 1, '#a89868', '#000', 0);
+  { const cw = tw('PLAY WITH A CODE') + 28; button(Math.round(LW / 2 - cw / 2), ny + 10, cw, 30, 'PLAY WITH A CODE', () => { fr.open = false; openRace(); }); }
+  button(Math.round(LW / 2 - 60), y + h - 40, 120, 30, 'DONE', closeFriends);
+}
+function drawInvite() {        // a friend's challenge, over everything
+  const iv = fr.invite; if (!iv) return;
+  if (performance.now() - iv.t > 30000) { fr.invite = null; return; }
+  const w = Math.min(LW - 24, 300), h = 150, x = Math.round((LW - w) / 2), y = clamp(Math.round(LH * 0.3 - h / 2), 40, LH - h - 10);
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.6)'; cover();
+  drawPanel(x, y, w, h);
+  g.save(); g.translate(x + 40, y + 42); g.rotate(-0.25); g.drawImage(skinFrame(iv.skin, [0, 1, 2, 1][(tick >> 3) % 4]), -21, -15, 42, 31); g.restore();
+  text(iv.name, x + 72, y + 18, 2, '#c2310c', '#000', 0, 'l');
+  text('CHALLENGES YOU!', x + 72, y + 40, 2, '#543847', '#000', 0, 'l');
+  text('A 1V1 RACE, RIGHT NOW', LW / 2, y + 76, 1, '#8a7438', '#000', 0);
+  const bw = Math.round((w - 40) / 2);
+  button(x + 14, y + h - 46, bw, 32, 'ACCEPT', acceptInvite);
+  button(x + w - 14 - bw, y + h - 46, bw, 32, 'NO THANKS', declineInvite, false);
 }
 
 // --- drawing
@@ -2316,11 +2504,11 @@ function drawRacePanel() {
     bigText(race.code, mid, y + 78, 5, '#ffd23f', '#f0a020');
     const o = race.opp;
     const status = race.err ? race.err : !race.joined ? 'CONNECTING...' : o ? o.name + ' IS HERE!'
-      : race.role === 'host' ? 'WAITING FOR A FRIEND...' : 'LOOKING FOR THE HOST...';
+      : race.invitee ? 'WAITING FOR ' + race.invitee.name : race.role === 'host' ? 'WAITING FOR A FRIEND...' : 'LOOKING FOR THE HOST...';
     M(status, 140, race.err ? '#c2310c' : o ? '#1f7a30' : '#543847');
-    if (race.role === 'host' && !race.err) M(o ? 'READY WHEN YOU ARE' : 'TELL THEM THIS CODE', 162, '#8a7438');
-    if (race.role === 'guest' && o && !race.err) M('THE HOST WILL START', 162, '#8a7438');
-    if (race.role === 'host' && o && !race.err) btn('START', 192, raceHostStart);
+    if (race.role === 'host' && !race.err) M(o ? (race.auto ? 'GET READY!' : 'READY WHEN YOU ARE') : race.invitee ? 'CHALLENGE SENT' : 'TELL THEM THIS CODE', 162, '#8a7438');
+    if (race.role === 'guest' && o && !race.err) M(race.auto ? 'GET READY!' : 'THE HOST WILL START', 162, '#8a7438');
+    if (race.role === 'host' && o && !race.err && !race.auto) btn('START', 192, raceHostStart);
     btn('LEAVE', 246, raceLeave, false, 120);
   } else if (race.panel === 'done') {
     const o = race.opp, r = race.result;
@@ -2401,7 +2589,7 @@ function openLB() {
   lbFlush();
   if (!lb.data.week || !lb.data.all || lb.data.week.err || performance.now() - (lb.data.week.t || 0) > 20000) lbLoad();
 }
-function closeLB() { lb.open = false; sfx('blip', false); }
+function closeLB() { lb.open = false; lb.pick = null; sfx('blip', false); }
 function lbButton(x, y, w) {
   const label = 'LEADERBOARD'; w = w || tw(label) + 28;
   button(x ?? Math.round((LW - w) / 2), y, w, 30, label, openLB);
@@ -2961,6 +3149,8 @@ function drawLB() {
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
       text(r.rank, r.rank > 99 ? x + 21 : x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
       birds.push({ id: SKINS.some(k => k.id === r.skin) ? r.skin : 'rookie', ly, i });   // drawn on top afterwards
+      if (!r.me && RACE_ON && ly >= top && ly + 18 <= bot) buttons.push({ x: x + 8, y: ly - 4, w: w - 16, h: 22, act: () => { lb.pick = lb.pick === nm ? null : nm; lb.pickMsg = ''; sfx('blip', true); } });
+      if (lb.pick === nm && !r.me) { g.fillStyle = '#e86a17'; g.fillRect(x + 8, ly + 18, w - 16, 2); }
       if (r.dev) devName(nm, x + 76, ly, x + w - 20 - tw(String(r.score)));
       else text(nm, x + 76, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
       text(r.score, x + w - 16, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
@@ -2992,10 +3182,17 @@ function drawLB() {
       g.fillStyle = '#8a7438'; g.fillRect(x + w - 8, ty, 3, th);
     }
   }
-  // your name + edit, and close
+  // your name + edit (or: add the player you tapped as a friend), and close
   g.fillStyle = '#c9b968'; g.fillRect(x + 10, y + h - 92, w - 20, 2);
-  text(player.name, x + 14, y + h - 76, 2, '#c2310c', '#000', 0, 'l');
-  button(x + w - 14 - 64, y + h - 82, 64, 28, 'EDIT', editName);
+  if (lb.pick) {
+    text(lb.pickMsg || 'ADD AS FRIEND?', x + 14, y + h - 84, 1, lb.pickMsg ? '#1f7a30' : '#8a7438', '#000', 0, 'l');
+    text(lb.pick, x + 14, y + h - 72, 2, '#c2310c', '#000', 0, 'l');
+    if (!lb.pickMsg) button(x + w - 14 - 64, y + h - 82, 64, 28, 'ADD', () => { const nm = lb.pick; lb.pickMsg = '...'; frRequest(nm).then(m => { if (lb.pick === nm) lb.pickMsg = m; }); });
+    button(x + w - 14 - 64 - 34, y + h - 82, 30, 28, 'X', () => { lb.pick = null; sfx('blip', false); }, false);
+  } else {
+    text(player.name, x + 14, y + h - 76, 2, '#c2310c', '#000', 0, 'l');
+    button(x + w - 14 - 64, y + h - 82, 64, 28, 'EDIT', editName);
+  }
   button(Math.round(LW / 2 - 60), y + h - 42, 120, 30, 'DONE', closeLB);
 }
 
@@ -3059,6 +3256,14 @@ function closeNameBox(ok) {
     if (!ok) return done();
     if (code.length !== 4) { nameMsg('CODES HAVE 4 LETTERS'); return; }
     done(); raceJoin(code); return;
+  }
+  if (boxMode === 'friend') {
+    const q = cleanName(inp.value);
+    if (!ok) return done();
+    if (!q) { nameMsg('TYPE A CODE OR A NAME'); return; }
+    nameMsg('CHECKING...');
+    frRequest(q).then(m => { if (m === 'REQUEST SENT!' || m === 'YOU ARE NOW FRIENDS!') { frNote(m); sfx('blip', true); done(); } else { nameMsg(m); sfx('blip', false); inp.focus(); inp.select(); } });
+    return;
   }
   if (boxMode === 'welcome') { player.picked = true; save(); }   // asked once, whatever the answer
   const n = ok ? cleanName(inp.value) : '';
@@ -3195,7 +3400,7 @@ function drawCompactHUD() {
     bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(LW / 2 + 36, 226);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
-    if (LB_ON) buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['RACE', openRace]] : [['LEADERBOARD', openLB]]); else notesButton(340);
+    if (LB_ON) { buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['FRIENDS', openFriends]] : [['LEADERBOARD', openLB]]); friendsBadge(); } else notesButton(340);
     if (TOUCH) {
       menuRow(420);
       text('BEST ' + best, LW / 2, A2HS_ON ? 460 : 466, 2, '#e86a17', '#ded895', 0);
@@ -3232,9 +3437,9 @@ function drawWideHUD() {
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
-    { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['DAILY', openDaily], ...(RACE_ON ? [['RACE', openRace]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
+    { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['DAILY', openDaily], ...(RACE_ON ? [['FRIENDS', openFriends]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
       while (it.reduce((a, [l]) => a + tw(l) + 28 + 16, -16) > LW - 40) it.pop();
-      buttonRow(344, it, 16); skinsButtonBadge(); dailyButtonBadge(); }
+      buttonRow(344, it, 16); skinsButtonBadge(); dailyButtonBadge(); friendsBadge(); }
     wideControls();
   }
   if (state === 'over') {
@@ -3651,6 +3856,8 @@ function draw() {
   if (race.panel) drawRacePanel();
   if (skinsUI.open) drawSkins();
   if (dailyUI.open) drawDaily();
+  if (fr.open) drawFriends();
+  if (inviteShown()) drawInvite();
   if (a2hs.open) drawA2HS();
   if (nameBoxOpen) drawNameBox();
   if (paused && resumeT) {
@@ -3774,7 +3981,7 @@ function addLight(x, y, r, k, rgb) {
 }
 function gatherLights() {
   lightN = 0;
-  if (notesPage >= 0 || settingsOpen || skinsUI.open || dailyUI.open || lb.open || a2hs.open || race.panel) return;   // menus sit on top of the world, keep glows off them
+  if (notesPage >= 0 || settingsOpen || skinsUI.open || dailyUI.open || fr.open || inviteShown() || lb.open || a2hs.open || race.panel) return;   // menus sit on top of the world, keep glows off them
   const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 90);
   for (const b of booms) if (b.t >= 0) {                                  // explosions flare hot, then fade
     const k = 1 - b.t / b.life;
@@ -3942,7 +4149,7 @@ addEventListener('keydown', e => {
   else if (k === 'KeyK') { if (skinsUI.open) closeSkins(); else openSkins(); }
   else if (k === 'KeyD') { if (dailyUI.open) closeDaily(); else openDaily(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (notesPage >= 0) closeNotes(); else if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (dailyUI.open) closeDaily(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (notesPage >= 0) closeNotes(); else if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (dailyUI.open) closeDaily(); else if (fr.open) closeFriends(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) closeNotes(); else openNotes(); }
@@ -3960,7 +4167,7 @@ screen.addEventListener('pointerdown', e => {
     if (lx >= L.x && lx < L.x + L.w && ly >= L.y && ly < L.y + L.h) lbDrag = { id: e.pointerId, y: e.clientY, s0: lb.scroll[lb.tab] || 0, k: (LH + TOP + OVER) / r.height, last: e.clientY, t: performance.now() };
   }
   const atEdge = visH - e.clientY < EDGE_PX;
-  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || dailyUI.open || notesPage >= 0)) {
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || dailyUI.open || fr.open || inviteShown() || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
@@ -4001,6 +4208,8 @@ function handleTap(cx, cy) {
   if (notesPage >= 0 && state === 'ready') { const q = notesRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeNotes(); return; }
   if (skinsUI.open) { const q = skinsUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSkins(); return; }
   if (dailyUI.open) { const q = dailyUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeDaily(); return; }
+  if (inviteShown()) return;
+  if (fr.open) { const q = fr.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeFriends(); return; }
   flap('click');
 }
 if (TOUCH) {
@@ -4074,6 +4283,10 @@ if (LB_ON) {
 checkSkins(true);   // retroactive unlocks (e.g. from your best score), quietly; a NEW badge shows on SKINS
 reset(); fade = 0;
 ensureDaily();
+if (RACE_ON) {
+  frLoad(); socialConnect();
+  document.addEventListener('visibilitychange', () => { if (document.hidden) socialDisconnect(); else { socialConnect(); frLoad(); } });
+}
 loadRun();          // a run that was interrupted by the app being closed
 requestAnimationFrame(loop);
 </script>
