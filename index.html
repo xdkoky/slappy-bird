@@ -627,30 +627,53 @@ const SKINS = [
   { id: 'desert',   name: 'DESERT CAMO',   tier: 'base', pal: { o: '#e8d8b0', v: '#f4ecd4' }, pat: camo(['#d8b878', '#b8905a', '#8a6a40', '#e8d0a0', '#d8b878']), how: 'CATCH 3 TOKENS', need: () => [stats.tokens, 3] },
   { id: 'tiger',    name: 'TIGER',         tier: 'base', pal: { o: '#fff4e0' }, pat: (x, y, ch) => ch === 'o' ? null : ((x + y * 0.7) % 5 < 1.4 ? '#2a1a10' : ch === 'Y' ? '#ffb050' : '#ff8a1c'), how: 'BEAT 3 BOSSES', need: () => [stats.bosses, 3] },
   { id: 'zebra',    name: 'ZEBRA',         tier: 'base', pal: { r: '#ff9a30' }, pat: (x, y) => ((x * 0.8 - y * 0.6 + 40) % 4 < 1.6 ? '#1a1a1a' : '#f4f4f4'), how: 'SCORE 40 IN ONE RUN', need: () => [best, 40] },
-  { id: 'lucky',    name: 'LUCKY',         tier: 'base', pal: { y: '#ffd23f', Y: '#fff4a0' }, pat: (x, y, ch) => ch !== 'o' && x % 4 === 1 && y % 3 === 1 ? '#f83850' : null, how: 'GET REVIVED BY THE SLOTS', need: () => [stats.revives, 1] },
+  { id: 'lucky',    name: 'JACKPOT',       tier: 'base', pal: { k: '#2a1018', y: '#c8283c', Y: '#f05a5a', o: '#f8c81c', v: '#d8dce8', r: '#f8c81c', R: '#b07810' },
+    pat: (x, y, ch) => ch === 'o' ? (y % 2 ? '#f8c81c' : '#b07810') : null, extra: slotBirdExtra,
+    how: 'GET REVIVED BY THE SLOTS', need: () => [stats.revives, 1] },
   { id: 'racer',    name: 'RACER',         tier: 'base', pal: { r: '#f83850', R: '#b01830' }, pat: (x, y, ch) => ch === 'o' ? '#f83850' : (((x >> 1) + (y >> 1)) & 1 ? '#1a1a1a' : '#f4f4f4'), how: 'WIN A 1V1 RACE', need: () => [stats.racesWon, 1], race: true },
-  // mastery: in order
+  // mastery: in order, each with several requirements
   { id: 'gold',     name: 'GOLD',          tier: 'gold', pal: { k: '#6a4808', y: '#f8c81c', Y: '#fff4a0', o: '#d8a010', v: '#fff0b0', r: '#fff4a0', R: '#d8a010' }, sheen: '#fffbe0',
-    how: 'UNLOCK EVERY SKIN ABOVE', need: () => [SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON) && hasSkin(k.id)).length, SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON)).length] },
+    reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'classic' && (!k.race || RACE_ON));
+      return [['ALL ' + base.length + ' SKINS ABOVE', base.filter(k => hasSkin(k.id)).length, base.length], ['BEAT EVERY BOSS', (stats.bossTypes || []).length, 1 + BOSSES.length]]; } },
   { id: 'platinum', name: 'PLATINUM',      tier: 'plat', pal: { k: '#4a5068', y: '#d4dae8', Y: '#ffffff', o: '#a8b0c8', v: '#ffffff', r: '#c0c8d8', R: '#8890a8' }, sheen: '#ffffff', after: 'gold',
-    how: 'GOLD + SCORE 60 IN ONE RUN', need: () => [best, 60] },
+    reqs: () => [['SCORE 75 IN A RUN', best, 75], ['PARRY 50 FIREBALLS', stats.parries, 50]] },
   { id: 'diamond',  name: 'DIAMOND',       tier: 'diamond', pal: { k: '#1a4a6a', o: '#c8f4ff', v: '#ffffff', r: '#e8fcff', R: '#a8e0f8' }, glow: [0.5, 0.9, 1], after: 'platinum', sparkle: '#e8ffff',
     pat: (x, y, ch, t) => ch === 'o' ? null : hash2(x, y + (t >> 4)) > 0.93 ? '#ffffff' : ((x + y) % 4 < 2 ? '#a8f0ff' : (x - y + 20) % 5 < 2 ? '#5ad0f8' : '#80e4ff'),
-    how: 'PLATINUM + BEAT 3 BOSSES IN ONE RUN', need: () => [stats.maxBossRun, 3] },
+    reqs: () => [['4 BOSSES IN ONE RUN', stats.maxBossRun, 4], ['CATCH 10 TOKENS', stats.tokens, 10]] },
   { id: 'darkmatter', name: 'DARK MATTER', tier: 'dark', pal: { k: '#0a0414', o: '#3a1060', v: '#c080ff', w: '#f0d0ff', r: '#b040e0', R: '#6a20a0' }, glow: [0.85, 0.15, 1], after: 'diamond', sparkle: '#e0a0ff',
     pat: (x, y, ch, t) => { if (hash2(x * 3, y + (t >> 3)) > 0.965) return '#ffffff'; const n = Math.sin(x * 0.9 + t * 0.08) + Math.cos(y * 1.1 - t * 0.06) + Math.sin((x + y) * 0.5 + t * 0.05); return ['#12061e', '#2a0c48', '#4c1880', '#8030c8', '#c060ff'][clamp(Math.floor(n + 2.2), 0, 4)]; },
-    how: 'DIAMOND + SCORE 100 IN ONE RUN', need: () => [best, 100] },
+    reqs: () => [['SCORE 150 IN A RUN', best, 150], ['6 BOSSES IN ONE RUN', stats.maxBossRun, 6], ['HIT 3 JACKPOTS', stats.revives, 3]] },
   { id: 'dev',      name: 'DEV',           tier: 'dev', pal: { k: '#1a0a20', w: '#ffffff', v: '#ffffff' }, glow: [1, 0.3, 0.75], sparkle: '#ffd0f0',
     pat: (x, y, ch, t) => `hsl(${(x * 18 + y * 9 + t * 5) % 360},100%,${ch === 'o' ? 70 : ch === 'Y' ? 66 : 55}%)`,
-    how: 'ONLY THE DEV HAS THIS ONE', need: () => player.isDev },
+    reqs: () => [['ONLY THE DEV HAS THIS ONE', player.isDev ? 1 : 0, 1]] },
 ];
 const skinById = id => SKINS.find(k => k.id === id) || SKINS[0];
+// JACKPOT: a bird-shaped slot machine - reel window with spinning symbols, lever with a red knob,
+// gold trim and blinking marquee bulbs along the top.
+function slotBirdExtra(x, f, t) {
+  const P = (px, py, c) => { x.fillStyle = c; x.fillRect(px, py, 1, 1); };
+  for (let i = 4; i <= 9; i++) P(i, 1, ((i + (t >> 3)) % 3) ? '#fff4a0' : '#f8c81c');   // marquee bulbs
+  P(5, 0, '#2a1018'); P(4, 0, '#2a1018');
+  // lever on the back
+  P(1, 2, '#8890a8'); P(1, 3, '#8890a8'); P(1, 4, '#8890a8'); P(0, 1, '#2a1018'); P(1, 1, '#e0203a'); P(0, 2, '#2a1018');
+  // reel window
+  for (let i = 4; i <= 11; i++) { P(i, 5, '#2a1018'); P(i, 9, '#2a1018'); }
+  for (let j = 6; j <= 8; j++) { P(4, j, '#2a1018'); P(11, j, '#2a1018'); }
+  const sym = ['#f83850', '#2f7cf6', '#f8c81c', '#f83850'];
+  for (let r = 0; r < 3; r++) {
+    const rx = 5 + r * 2, s = ((t >> 2) + r * 5) % 24 < 18 ? (((t >> 2) + r) % 4) : 0;    // spin, then settle on hearts
+    for (let j = 6; j <= 8; j++) { P(rx, j, '#fff8e8'); P(rx + 1, j, '#fff8e8'); }
+    P(rx, 7, sym[s]); P(rx + 1, 7, sym[s]); P(rx, 6, s === 0 ? sym[s] : '#fff8e8');
+  }
+  for (let i = 4; i <= 11; i++) P(i, 10, '#f8c81c');                                     // gold trim
+}
 const hasSkin = id => stats.skins.includes(id);
-const skinProgress = k => {        // [have, need] or a boolean
-  if (k.after && !hasSkin(k.after)) return [0, 1];
-  const r = k.need(); return Array.isArray(r) ? r : (r ? [1, 1] : [0, 1]);
+// Requirements as [label, have, need] lines. Base skins have one; mastery skins have several.
+const skinReqs = k => {
+  if (k.reqs) return k.reqs();
+  const r = k.need(); return [[k.how, ...(Array.isArray(r) ? r : [r ? 1 : 0, 1])]];
 };
-const skinReady = k => { const [a, b] = skinProgress(k); return a >= b; };
+const skinReady = k => (!k.after || hasSkin(k.after)) && skinReqs(k).every(([, a, b]) => a >= b);
 const equipped = () => skinById(hasSkin(stats.skin) ? stats.skin : 'classic');
 let statsDirty = false, toasts = [];
 function statAdd(key, n = 1) { if (raceOn() && key !== 'racesWon') return; stats[key] = (stats[key] || 0) + n; statsDirty = true; }
@@ -665,7 +688,7 @@ function saveStats() { try { localStorage.setItem('slappy-stats', JSON.stringify
 // Built frames per skin; animated skins rebuild every few ticks (each frame is only 18x13 pixels).
 const skinCache = new Map();
 function skinFrame(id, f, t = tick) {
-  const k = skinById(id), animated = !!(k.sheen || k.glow || k.tier === 'dev');
+  const k = skinById(id), animated = !!(k.sheen || k.glow || k.extra || k.tier === 'dev');
   const bucket = animated ? (t >> 1) : 0, key = id + f + '|' + bucket;
   let c = skinCache.get(key); if (c) return c;
   if (skinCache.size > 400) skinCache.clear();
@@ -675,6 +698,7 @@ function skinFrame(id, f, t = tick) {
     if (!pal[ch]) return;
     x.fillStyle = (k.pat && 'yYo'.includes(ch) && k.pat(i, j, ch, t)) || pal[ch]; x.fillRect(i, j, 1, 1);
   }));
+  if (k.extra) k.extra(x, f, t);
   WING.forEach((row, j) => [...row].forEach((ch, i) => { if (pal[ch]) { x.fillStyle = pal[ch]; x.fillRect(i, j + 4 + [-1, 0, 1][f], 1, 1); } }));
   if (k.sheen) {                                  // a shine sweeping across now and then
     const ph = (t % 150) / 40;
@@ -775,7 +799,7 @@ const NOTES_VERSION = 13;
 const PATCH_NOTES = [
   { title: 'SKINS', items: [
     { h: 'EARN NEW LOOKS', col: '#e86a17', t: 'TAP SKINS TO SEE 13 SKINS. EACH ONE UNLOCKS WITH A CHALLENGE.' },
-    { h: 'THE GRIND', col: '#c8860c', t: 'GET THEM ALL FOR GOLD. THEN PLATINUM, DIAMOND AND DARK MATTER. GOOD LUCK!' },
+    { h: 'THE GRIND', col: '#c8860c', t: 'GET THEM ALL AND BEAT EVERY BOSS FOR GOLD. THEN PLATINUM, DIAMOND AND DARK MATTER. GOOD LUCK!' },
   ] },
   { title: '1V1 RACE', items: [
     { h: 'RACE A FRIEND', col: '#3a90d8', t: 'TAP RACE AND CREATE A ROOM. YOUR FRIEND JOINS WITH THE 4 LETTER CODE ON THEIR PHONE.' },
@@ -1436,6 +1460,7 @@ function updateBoss() {
       score += 10; popup('+10', b.x, b.y - 30, { sc: 4, fill: '#fff', ol: '#543847', life: 70, vy: -0.6 });
       setBanner('BOSS DEFEATED!', 'BONUS +10', 'victory', 130);
       setTimeout(() => sfx('victory'), 250);
+      if (!raceOn() && !(stats.bossTypes || []).includes(b.def.name)) { stats.bossTypes = [...(stats.bossTypes || []), b.def.name]; statsDirty = true; }
       bossesBeaten++; nextBossAt = spawned + BOSS_EVERY; boss = null;
       statAdd('bosses'); if (bossesBeaten > (stats.maxBossRun || 0) && !raceOn()) { stats.maxBossRun = bossesBeaten; statsDirty = true; }
     }
@@ -2107,7 +2132,7 @@ const TIER_COL = { base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '
 function drawSkins() {
   const list = SKINS.filter(k => !k.race || RACE_ON);
   const cols = wide ? 6 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
-  const rows = Math.ceil(list.length / cols), h = 54 + rows * ch + 152;
+  const rows = Math.ceil(list.length / cols), h = 54 + rows * ch + 236;
   const y = clamp(Math.round((Math.min(LH, 600) - h) / 2), 6, Math.max(6, LH - h - 6));
   skinsUI.rect = { x, y, w, h };
   buttons = [];
@@ -2140,14 +2165,21 @@ function drawSkins() {
   text(k.name, x + 14, dy + 4, 2, k.tier === 'base' ? '#543847' : TIER_COL[k.tier] === '#c8d0e0' ? '#6a7290' : TIER_COL[k.tier], '#000', 0, 'l');
   const tierName = { base: '', gold: 'MASTERY', plat: 'MASTERY', diamond: 'MASTERY', dark: 'MASTERY', dev: 'SECRET' }[k.tier];
   if (tierName) text(tierName, x + w - 14, dy + 4, 2, '#8a7438', '#000', 0, 'r');
-  const max = Math.floor((w - 28 + 2) / 12); let ly = dy + 24;
-  for (const l of wrapText(k.how, max)) { text(l, x + 14, ly, 2, '#8a7438', '#000', 0, 'l'); ly += 18; }
-  if (!have && k.tier !== 'dev') {                // progress bar
-    const [a, b] = skinProgress(k), bw = w - 28 - 70, pk = clamp(a / b, 0, 1);
-    g.fillStyle = '#543847'; g.fillRect(x + 14, ly + 2, bw, 10); g.fillStyle = '#e8dcb0'; g.fillRect(x + 16, ly + 4, bw - 4, 6);
-    g.fillStyle = '#e86a17'; g.fillRect(x + 16, ly + 4, Math.round((bw - 4) * pk), 6);
-    text(k.after && !hasSkin(k.after) ? 'LOCKED' : Math.min(a, b) + '/' + b, x + w - 14, ly, 2, '#543847', '#000', 0, 'r');
-    if (k.after && !hasSkin(k.after)) text('NEEDS ' + skinById(k.after).name + ' FIRST', x + 14, ly + 18, 2, '#c2310c', '#000', 0, 'l');
+  let ly = dy + 26;
+  const locked = k.after && !hasSkin(k.after);
+  if (locked) { text('NEEDS ' + skinById(k.after).name + ' FIRST', x + 14, ly, 2, '#c2310c', '#000', 0, 'l'); ly += 22; }
+  const maxc = Math.floor((w - 28 + 2) / 12);
+  for (const [label, a, b] of skinReqs(k)) {      // label, then a bar with the count beside it
+    const done = have || a >= b;
+    for (const l of wrapText(label, maxc)) { text(l, x + 14, ly, 2, done ? '#1f7a30' : '#8a7438', '#000', 0, 'l'); ly += 18; }
+    if (k.tier !== 'dev') {
+      const cnt = done ? 'DONE' : Math.min(a, b) + '/' + b, bw = w - 28 - tw(cnt) - 10, pk = done ? 1 : clamp(a / b, 0, 1);
+      g.fillStyle = '#543847'; g.fillRect(x + 14, ly + 2, bw, 8); g.fillStyle = '#e8dcb0'; g.fillRect(x + 16, ly + 4, bw - 4, 4);
+      g.fillStyle = done ? '#7fe05a' : '#e86a17'; g.fillRect(x + 16, ly + 4, Math.round((bw - 4) * pk), 4);
+      text(cnt, x + w - 14, ly - 2, 2, done ? '#1f7a30' : '#543847', '#000', 0, 'r');
+      ly += 18;
+    }
+    ly += 4;
   }
   const eqd = equipped().id === k.id;
   button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; saveStats(); sfx('coin'); } }, have && !eqd);
