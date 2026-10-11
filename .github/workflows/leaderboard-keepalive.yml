@@ -1,6 +1,6 @@
 # Free Supabase projects pause after a week without traffic. This pings the leaderboard every three
-# days so it stays awake even if nobody plays for a while. It reads the (public) project URL and anon
-# key from index.html, so there is nothing to configure; it does nothing until those are filled in.
+# days so it stays awake even if nobody plays for a while. It finds the (public) project URL and publishable
+# key in index.html, so there is nothing to configure; it does nothing until those are filled in.
 name: Leaderboard keep-alive
 
 on:
@@ -18,8 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Ping Supabase
         run: |
-          url=$(sed -n "s/^const LB_URL = '\(.*\)';.*/\1/p" index.html)
-          key=$(sed -n "s/^const LB_KEY = '\(.*\)';.*/\1/p" index.html)
+          # works on the readable source and on the scrambled public build alike
+          url=$(grep -o "https://[a-z0-9]*\.supabase\.co" index.html | head -1)
+          key=$(grep -o "sb_publishable_[A-Za-z0-9_-]*" index.html | head -1)
           if [ -z "$url" ] || [ -z "$key" ]; then echo "Leaderboard not configured yet, skipping."; exit 0; fi
           curl -fsS -X POST "${url%/}/rest/v1/rpc/leaderboard" \
             -H "apikey: $key" -H "Content-Type: application/json" \
