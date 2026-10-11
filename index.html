@@ -651,7 +651,7 @@ const SKINS = [
   { id: 'darkmatter', name: 'DARK MATTER', tier: 'dark', pal: { k: '#0a0414', o: '#3a1060', v: '#c080ff', w: '#f0d0ff', r: '#b040e0', R: '#6a20a0' }, glow: [0.85, 0.15, 1], after: 'diamond', sparkle: '#e0a0ff',
     pat: (x, y, ch, t) => { if (hash2(x * 3, y + (t >> 3)) > 0.965) return '#ffffff'; const n = Math.sin(x * 0.9 + t * 0.08) + Math.cos(y * 1.1 - t * 0.06) + Math.sin((x + y) * 0.5 + t * 0.05); return ['#12061e', '#2a0c48', '#4c1880', '#8030c8', '#c060ff'][clamp(Math.floor(n + 2.2), 0, 4)]; },
     reqs: () => [['SCORE 150 IN A RUN', best, 150], ['6 BOSSES IN ONE RUN', stats.maxBossRun, 6], ['HIT 3 JACKPOTS', stats.revives, 3]] },
-  { id: 'classic',  name: 'CLASSIC',       tier: 'secret', pal: {}, hint: 'THE YEAR IT ALL STARTED. THE GROUND.',
+  { id: 'classic',  name: 'CLASSIC',       tier: 'secret', pal: {}, hint: 'THE YEAR IT ALL STARTED. READ IT LIKE A CLOCK.',
     reqs: () => [['FIND THE SECRET', stats.egg ? 1 : 0, 1]] },
   { id: 'dev',      name: 'DEV',           tier: 'dev', pal: { k: '#1a0a20', w: '#ffffff', v: '#ffffff' }, glow: [1, 0.3, 0.75], sparkle: '#ffd0f0',
     pat: (x, y, ch, t) => `hsl(${(x * 18 + y * 9 + t * 5) % 360},100%,${ch === 'o' ? 70 : ch === 'Y' ? 66 : 55}%)`,
@@ -687,10 +687,17 @@ const skinReady = k => (!k.after || hasSkin(k.after)) && skinReqs(k).every(([, a
 const equipped = () => skinById(hasSkin(stats.skin) ? stats.skin : 'rookie');
 let statsDirty = false, toasts = [];
 function statAdd(key, n = 1) { if (raceOn() && key !== 'racesWon') return; stats[key] = (stats[key] || 0) + n; statsDirty = true; }
+// easter egg: have the game open at exactly 20:14 on your phone's clock (2014...)
+function checkEgg() {
+  if (stats.egg) return;
+  const d = new Date();
+  if (d.getHours() === 20 && d.getMinutes() === 14) { stats.egg = true; statsDirty = true; }
+}
 function checkSkins(silent) {
+  checkEgg();
   for (const k of SKINS) if (!hasSkin(k.id) && (!k.race || RACE_ON) && skinReady(k)) {
     stats.skins.push(k.id); stats.fresh = (stats.fresh || 0) + 1; statsDirty = true;
-    if (!silent) { toasts.push({ id: k.id, t: 0 }); sfx('token'); }
+    if (!silent || k.id === 'classic') { toasts.push({ id: k.id, t: 0 }); sfx('token'); }   // the secret always gets its moment
   }
   if (statsDirty) { statsDirty = false; saveStats(); }
 }
@@ -1033,8 +1040,6 @@ function flap(src) {
 }
 
 function crash(onGround) {
-  // easter egg: nose-dive straight into the ground with exactly 14 points (2014...)
-  if (onGround && score === 14 && !raceOn() && !stats.egg) { stats.egg = true; statsDirty = true; }
   sfx('hit'); flash = 1; shake = 7;
   for (const s of shots) s.dead = true;
   if (score > best && !raceOn()) { best = score; newBest = true; save(); }
