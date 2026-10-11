@@ -2777,20 +2777,26 @@ function drawSlot() {
 
   // big SPIN button: the close-up of the cabinet's button, and the thing to tap
   const bw = 156, bh = 48, bx = Math.round((LW - bw) / 2), by = crY + 22 + gap, can = canSpin() && idle;
-  const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10) || pressAmount('spin') > 0.3;
+  const pressed = s.phase === 'spin' || (s.pull >= 0 && s.pull < 10) || pressAmount('spin') > 0;
+  // smooth press: quick ease down, held while the reels spin, soft spring back up
+  s.btnD = (s.btnD || 0) + ((pressed ? 1 : 0) - (s.btnD || 0)) * (pressed ? 0.45 : 0.18);
   if (!party) {
-    const dy = pressed ? 4 : 0, BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
+    const dy = Math.round(s.btnD * 5), BR = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); };
     const rrB = (x, y, w, h, c, cut) => { BR(x + cut, y, w - cut * 2, h, c); BR(x, y + cut, w, h - cut * 2, c); BR(x + cut / 2, y + cut / 2, w - cut, h - cut, c); };
-    uiShadow(bx + 4, by + 4, bw - 8, bh + 2);
-    rrB(0, 0, bw, bh + 6, '#543847', 10);                                   // bezel
-    rrB(2, 2, bw - 4, bh + 2, '#d8dce8', 9); rrB(4, 4 + bh - 4, bw - 8, 6, '#8890a8', 4);
-    rrB(6, 6 + dy, bw - 12, bh - 8 - dy, '#2a1018', 8);                     // button cap
-    const face = can || pressed ? '#f83850' : '#a89098', shade = can || pressed ? '#b01830' : '#806870';
-    rrB(8, 8 + dy, bw - 16, bh - 12 - dy, shade, 7);
-    rrB(8, 8 + dy, bw - 16, bh - 18 - dy, face, 7);
-    BR(18, 12 + dy, bw - 36, 4, can || pressed ? '#ff9aa8' : '#c8b8c0');   // shine
+    const H = bh + 6;                                                       // whole button height
+    rrB(1, 4, bw, H, 'rgba(10,4,16,0.35)', 10);                            // rounded drop shadow, same shape
+    rrB(0, 0, bw, H, '#2a1018', 10);                                        // outline
+    rrB(2, 2, bw - 4, H - 4, '#d8dce8', 9);                                 // silver rim
+    rrB(7, H - 7, bw - 14, 5, '#aab0c6', 3);                                // rim's lower edge (inside the rounded outline)
+    rrB(5, 5, bw - 10, H - 10, '#2a1018', 8);                               // the well the cap sits in
+    const face = can || pressed ? '#f83850' : '#a89098', side = can || pressed ? '#a01028' : '#786068';
+    const capH = bh - 18, depth = 6 - dy;                                   // the cap's visible side shrinks as it goes down
+    rrB(7, 7 + dy, bw - 14, capH + depth, side, 7);
+    rrB(7, 7 + dy, bw - 14, capH, face, 7);
+    if (dy < 4) BR(18, 11 + dy, bw - 36, 3, can || pressed ? '#ff9aa8' : '#c8b8c0');   // shine (hidden when fully down)
+    g.globalAlpha = s.btnD * 0.25; rrB(7, 7 + dy, bw - 14, capH, '#000', 7); g.globalAlpha = 1;   // darker when pressed in
     const label = !idle && !pressed ? '' : can || pressed ? 'SPIN' : 'NO TOKENS';
-    text(label, bx + bw / 2, by + 13 + dy, label === 'SPIN' ? 3 : 2, '#fff', '#7a0c20', 2);
+    text(label, bx + bw / 2, by + 12 + dy, label === 'SPIN' ? 3 : 2, '#fff', '#7a0c20', 2);
     if (can) buttons.push({ x: bx - 6, y: by - 6, w: bw + 12, h: bh + 18, act: () => { if (slot.t > 30) spin(); }, key: 'spin' });
     if (can && s.t > 30) {                                                  // pointing hand taps the button
       const tap = (tick / 20 | 0) % 2 === 0, hx = bx + bw - 4, hy = by + bh - 14 + (tap ? 0 : 5);
