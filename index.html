@@ -976,7 +976,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 17;
-const BUILD = '1012-24';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-25';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 17, title: 'TRAILS', items: [
     { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
@@ -2344,7 +2344,7 @@ function drawRacePanel() {
 // Weekly (resets Mondays 00:00 UTC) and all-time top 100, shared by everyone, via Supabase.
 const lb = { open: false, tab: 'week', rect: null, data: { week: null, all: null }, busy: { week: false, all: false },
   scroll: { week: null, all: null }, vel: 0, list: null };   // scroll: null = not placed yet (jumps to your row)
-const LB_ROWS = 100, LB_ROW = 22;
+const LB_ROWS = 100, LB_ROW = 26;
 let lbDrag = null;
 function lbScrollBy(d) { lb.scroll[lb.tab] = (lb.scroll[lb.tab] || 0) + d; lb.vel = 0; }
 function lbCall(fn, body) {
@@ -2932,6 +2932,7 @@ function drawLB() {
     if (!lbDrag && Math.abs(lb.vel) > 0.2) { lb.scroll[lb.tab] += lb.vel; lb.vel *= 0.92; } else if (!lbDrag) lb.vel = 0;
     const sc = lb.scroll[lb.tab] = clamp(lb.scroll[lb.tab], 0, maxS);
     g.save(); g.beginPath(); g.rect(x - 14, top, w + 28, view); g.clip();
+    const birds = [];
     d.rows.forEach((r, i) => {
       const ly = Math.round(top + 6 + offs[i] - sc);
       if (ly < top - LB_ROW || ly > bot + 4) return;
@@ -2939,10 +2940,10 @@ function drawLB() {
         for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly - 12, 4, 4); }
       }
       const nm = cleanName(r.name) || 'PLAYER';
-      if (r.dev) devRowBack(x + 8, ly - 3, w - 16, 20);
-      else if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 3, w - 16, 20); }
+      if (r.dev) devRowBack(x + 8, ly - 4, w - 16, 22);
+      else if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 4, w - 16, 22); }
       if (r.me) {                                  // you: pulsing orange outline + an arrow at the panel edge
-        const on = Math.sin(performance.now() / 180) > -0.3, c = on ? '#e86a17' : '#f8a050', rx = x + 6, ry = ly - 5, rw = w - 12, rh = 24;
+        const on = Math.sin(performance.now() / 180) > -0.3, c = on ? '#e86a17' : '#f8a050', rx = x + 6, ry = ly - 6, rw = w - 12, rh = 26;
         if (!r.dev || on) { g.fillStyle = c; g.fillRect(rx, ry, rw, 2); g.fillRect(rx, ry + rh - 2, rw, 2); g.fillRect(rx, ry, 2, rh); g.fillRect(rx + rw - 2, ry, 2, rh); }
         const bob = Math.round(Math.sin(performance.now() / 160) * 2), ax = x + 2 + bob, ay = ly + 7;
         for (let i = 0; i < 9; i++) { g.fillStyle = '#543847'; g.fillRect(ax - 10 + i, ay - 9 + i, 2, 19 - i * 2); }
@@ -2951,12 +2952,25 @@ function drawLB() {
       const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
       text(r.rank, r.rank > 99 ? x + 21 : x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
-      const sk = SKINS.some(k => k.id === r.skin) ? r.skin : 'rookie';   // the bird they fly: flex the rare ones
-      g.drawImage(skinFrame(sk, [0, 1, 2, 1][((tick >> 3) + i) % 4]), x + 39, ly - 2, 24, 18);
-      if (r.dev) devName(nm, x + 66, ly, x + w - 20 - tw(String(r.score)));
-      else text(nm, x + 66, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
+      birds.push({ id: SKINS.some(k => k.id === r.skin) ? r.skin : 'rookie', ly, i });   // drawn on top afterwards
+      if (r.dev) devName(nm, x + 76, ly, x + w - 20 - tw(String(r.score)));
+      else text(nm, x + 76, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
       text(r.score, x + w - 16, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
     });
+    // each player's bird, big and tilted up, hanging over the row lines; rare skins twinkle
+    for (const bd of birds) {
+      const k = skinById(bd.id), bob = Math.round(Math.sin(tick * 0.08 + bd.i * 0.9)), cx = x + 54, cy = bd.ly + 5 + bob;
+      g.fillStyle = 'rgba(40,24,50,0.2)'; g.fillRect(cx - 10, bd.ly + 18, 20, 2);                       // soft shadow
+      g.save(); g.translate(cx, cy); g.rotate(-0.26);
+      g.drawImage(skinFrame(bd.id, [0, 1, 2, 1][((tick >> 3) + bd.i) % 4]), -15, -11, 30, 22);
+      g.restore();
+      if (k.tier !== 'base' && k.tier !== 'secret' || k.id === 'classic') {                               // the rare ones sparkle
+        const ph = (tick + bd.i * 13) % 50, s = ph < 6 ? 1 : ph < 12 ? 3 : ph < 18 ? 1 : 0;
+        if (s) { const sx = cx + 14, sy = cy - 13, c = k.id === 'classic' ? '#ffd23f' : TIER_COL[k.tier];
+          g.fillStyle = '#fff'; g.fillRect(sx - 1, sy - 1, 2, 2);
+          g.fillStyle = c; g.fillRect(sx - s - 1, sy, s * 2 + 2, 1); g.fillRect(sx, sy - s - 1, 1, s * 2 + 2); }
+      }
+    }
     g.restore();
     if (maxS > 0) {                                            // soft edges + a scrollbar when there's more
       for (let k = 0; k < 4; k++) {
