@@ -1,7 +1,0 @@
-{
-  "name": "slappy-bird-tools",
-  "private": true,
-  "type": "module",
-  "description": "Builds the public scrambled copy of Slappy Bird",
-  "dependencies": { "javascript-obfuscator": "4.1.1", "terser": "5.31.0" }
-}
