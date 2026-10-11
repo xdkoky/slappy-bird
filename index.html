@@ -332,6 +332,45 @@ const SFX = {
     const t = ac.currentTime;
     [0, 0.17].forEach((dt, i) => { const o = osc('sine', t + dt, 0.16, 75, 38), og = ac.createGain(); env(og.gain, t + dt, 0.004, i ? 0.6 : 0.9, 0.15); o.connect(og); route(og, 0.05); });
   },
+  drumroll(sec) { // snare roll that speeds up and swells until the last reel lands (stopDrum cuts it)
+    stopDrum();
+    const t = ac.currentTime, bus = ac.createGain(); route(bus, 0.25); drumBus = bus;
+    for (let ts = t, i = 0; ts < t + sec; i++) {
+      const k = (ts - t) / sec, n = noise(ts, 0.05), bp = ac.createBiquadFilter(), gn = ac.createGain();
+      bp.type = 'bandpass'; bp.frequency.value = 1700 + k * 1500 + Math.random() * 300; bp.Q.value = 0.9;
+      env(gn.gain, ts, 0.001, 0.06 + 0.26 * k * k + (i % 2 ? 0 : 0.03), 0.045); n.connect(bp); bp.connect(gn); gn.connect(bus);
+      if (i % 2 === 0) { const o = osc('triangle', ts, 0.05, 230, 170), og = ac.createGain(); env(og.gain, ts, 0.001, 0.04 + 0.12 * k, 0.045); o.connect(og); og.connect(bus); }
+      ts += 1 / (15 + 11 * k);
+    }
+    const r = osc('sine', t, sec, 62, 82), rg = ac.createGain();     // low timpani swell underneath
+    rg.gain.setValueAtTime(0.0001, t); rg.gain.exponentialRampToValueAtTime(0.3, t + sec); r.connect(rg); rg.connect(bus);
+  },
+  crash() { // ba-DUM + cymbal: the roll pays off
+    const t = ac.currentTime;
+    const o = osc('sine', t, 0.3, 140, 50), og = ac.createGain(); env(og.gain, t, 0.002, 0.9, 0.28); o.connect(og); route(og, 0.1);
+    const n = noise(t, 1.6), hp = ac.createBiquadFilter(), ng = ac.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 4500; env(ng.gain, t, 0.002, 0.45, 1.5); n.connect(hp); hp.connect(ng); route(ng, 0.5);
+  },
+  aww() { // a disappointed crowd: detuned voices through an "aw" vowel, all sliding down together
+    const t = ac.currentTime, dur = 1.6, bus = ac.createGain(), out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(0.5, t + 0.14);
+    out.gain.setValueAtTime(0.5, t + 0.55); out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    [[650, 5, 1], [1050, 7, 0.55], [2600, 9, 0.18]].forEach(([f, q, v]) => {
+      const bp = ac.createBiquadFilter(), gv = ac.createGain(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q; gv.gain.value = v;
+      bus.connect(bp); bp.connect(gv); gv.connect(out);
+    });
+    route(out, 0.45);
+    for (let i = 0; i < 10; i++) {
+      const f = i < 5 ? 150 + Math.random() * 60 : 250 + Math.random() * 90, ts = t + Math.random() * 0.08;
+      const o = ac.createOscillator(), vg = ac.createGain(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 1.04, ts); o.frequency.exponentialRampToValueAtTime(f * 1.12, ts + 0.16);
+      o.frequency.exponentialRampToValueAtTime(f * 0.7, t + dur);
+      const vib = osc('sine', ts, dur, 4.5 + Math.random() * 2), vd = ac.createGain(); vd.gain.value = f * 0.012; vib.connect(vd); vd.connect(o.frequency);
+      vg.gain.value = 0.07; o.connect(vg); vg.connect(bus); o.start(ts); o.stop(t + dur + 0.05);
+    }
+    const n = noise(t, dur), bp = ac.createBiquadFilter(), ng = ac.createGain();   // breathy crowd air
+    bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.7; env(ng.gain, t, 0.12, 0.06, dur - 0.12); n.connect(bp); bp.connect(ng); route(ng, 0.4);
+  },
   payout(n) { // a cascade of coin dings
     const t = ac.currentTime;
     for (let i = 0; i < Math.min(n, 12); i++) {
@@ -390,6 +429,12 @@ const SFX = {
     n.connect(hp); hp.connect(ng); route(ng, 0.6);
   },
 };
+let drumBus = null;
+function stopDrum() {
+  if (!drumBus) return;
+  const t = ac.currentTime, gn = drumBus.gain; drumBus = null;
+  gn.cancelScheduledValues(t); gn.setValueAtTime(1, t); gn.exponentialRampToValueAtTime(0.0001, t + 0.05);
+}
 function sfx(name, arg) { audioInit(); if (!muted && ac) try { SFX[name](arg); } catch {} }
 
 // ============================================================ pixel font 5x7
@@ -1233,7 +1278,7 @@ function downed() {
   save();
   if (canSpin()) {
     state = 'slot';
-    slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0,
+    slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0, zoom: 0, resT: 0, flares: [],
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
   } else { state = 'over'; overT = 0; lbSubmit(score); statAdd('runs'); checkSkins(); }
 }
@@ -1263,22 +1308,31 @@ function updateSlot() {
       if (Math.floor(r.pos) !== Math.floor(before) && tick - s.lastTick >= 3) { s.lastTick = tick; sfx('tick'); }
       if (r.t >= r.T1 + r.Td) {
         r.pos = r.to; r.done = true; r.bounce = 10; shake = Math.max(shake, 2); sfx('reelStop');
-        if (i === 1 && s.suspense) sfx('heartbeat');
+        if (i === 1 && s.suspense) { const r2 = s.reels[2]; sfx('drumroll', (r2.T1 + r2.Td - r2.t) / 60); }
+        if (i === 2 && s.suspense) stopDrum();
       }
     });
-    if (s.suspense && s.reels[1].done && !s.reels[2].done && s.reels[2].t % 36 === 0) sfx('heartbeat');
     if (s.reels.every(r => r.done)) resolveSpin();
   } else if (s.phase === 'jackpot') {
-    if (++s.jt % 6 === 0) burst(LW / 2 + rand(-80, 80), rand(120, 200), 6, ['#f83850', '#ffd0d8', '#fff', '#ffe14d'], 3, 30, 4);
+    if (++s.jt % 6 === 0) {
+      const x = (s.cx ?? LW / 2) + rand(-90, 90), y = (s.cy ?? 160) + rand(-60, 60);
+      burst(x, y, 6, ['#f83850', '#ffd0d8', '#fff', '#ffe14d'], 3, 30, 4);
+      s.flares.push({ x, y, t: 0, rgb: pick([[1, 0.25, 0.35], [1, 0.8, 0.3], [1, 0.5, 0.75]]) });
+    }
     if (s.jt >= 130) startRevive();
   } else if (s.t > 30 && --s.count <= 0) giveUp();
   for (const r of s.reels) if (r.bounce > 0) r.bounce--;
+  for (const f of s.flares) f.t++; s.flares = s.flares.filter(f => f.t < 24);
+  // the camera leans in while the last reel decides, and holds a moment on the result
+  const lean = s.suspense && (s.phase === 'spin' ? s.reels[1].done : s.phase === 'jackpot' || s.t - s.resT < 50);
+  s.zoom += ((lean ? 1 : 0) - s.zoom) * (lean ? 0.05 : 0.08);
 }
 function resolveSpin() {
   const s = slot, o = s.out, three = o[0] === o[1] && o[1] === o[2];
+  s.resT = s.t;
   if (three && o[0] === 'heart') {
     s.phase = 'jackpot'; s.jt = 0; s.res = 'jackpot'; s.msg = 'JACKPOT!';
-    flash = 0.6; shake = 10; sfx('jackpot'); return;
+    flash = 0.6; shake = 10; sfx('crash'); sfx('jackpot'); return;
   }
   s.phase = 'result'; s.count = 540;
   if (three && PAY[o[0]]) {
@@ -1288,11 +1342,11 @@ function resolveSpin() {
     burst(LW / 2, 200, 30, tok ? ['#f0a0ff', '#c040e0', '#fff'] : ['#fff4a0', '#f8c81c', '#fff'], 4, 30, 4);
   } else {
     s.res = 'lose'; s.msg = three ? 'CURSED!' : o[0] === 'heart' && o[1] === 'heart' ? 'SO CLOSE!' : 'NO LUCK';
-    sfx('lose');
+    sfx(s.suspense ? 'aww' : 'lose');
   }
   if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
-function giveUp() { state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
+function giveUp() { stopDrum(); state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
 
 // ------------------------------------------------------------ revive
 // A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
@@ -2706,6 +2760,10 @@ function drawSlot() {
   // vertical rhythm: fixed block heights, the leftover height is shared out evenly between them
   const gap = clamp(Math.floor((LH - 28 - 392) / 7 / 2) * 2, 6, 28), hy0 = 12 - oy;
   const mx = Math.round((LW - MW) / 4) * 2, my = hy0 + 34 + gap;
+  // camera lean: scale everything about the reel window (smoothstep eased), buttons follow below
+  const zk = s.zoom * s.zoom * (3 - 2 * s.zoom) * (1 - out), z = 1 + 0.14 * zk, fx = mx + MW / 2, fy = my + 108, nb = buttons.length;
+  s.cx = fx; s.cy = fy;
+  g.save(); g.translate(fx, fy); g.scale(z, z); g.translate(-fx, -fy);
   const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(mx + x, my + y, w, h); };
   const rr = (x, y, w, h, c, cut = 2) => { R(x + cut, y, w - cut * 2, h, c); R(x, y + cut, w, h - cut * 2, c); };
   const party = s.phase === 'jackpot', fast = s.phase === 'spin', idle = s.phase === 'idle' || s.phase === 'result';
@@ -2829,6 +2887,9 @@ function drawSlot() {
   }
   if (idle && s.t > 30)
     button(Math.round((LW - 140) / 2), ty + 26 + gap, 140, 30, TOUCH ? 'GIVE UP' : 'X: GIVE UP', giveUp, false);
+  g.restore();
+  for (const b of buttons.slice(nb)) { b.x = fx + (b.x - fx) * z; b.y = fy + (b.y - fy) * z; b.w *= z; b.h *= z; }
+  s.z = z;
 }
 
 function drawBoss() {
@@ -3162,6 +3223,22 @@ function gatherLights() {
     else if (c.big && (!c.pipe || c.pipe.intro >= INTRO)) addLight(c.x, c.y, 40, 0.3 * pulse, [1, 0.85, 0.35]);
   }
   for (const r of rings) addLight(r.x, r.y, r.r + 30, 0.25, [1, 0.95, 0.75]);
+  if (slot && slot.cx != null && (state === 'slot' || state === 'revive')) {   // slot machine: the jackpot goes off
+    const s = slot, z = s.z || 1, X = x => s.cx + (x - s.cx) * z, reelX = i => X(s.cx - 106 + 47 + i * 59), ry = s.cy;
+    if (s.phase === 'spin' && s.suspense && s.reels[1].done) {        // a red glow building on the last reel
+      const r = s.reels[2], k = Math.min(1, (r.t - r.T1 + 40) / (r.Td + 40));
+      addLight(reelX(2), ry, 50 + 40 * k, (0.2 + 0.5 * k) * pulse, [1, 0.3, 0.35]);
+    }
+    if (s.phase === 'jackpot' || (state === 'revive' && s.res === 'jackpot')) {
+      const t = s.jt, k = Math.max(0, 1 - t / 40), fade = state === 'revive' ? Math.max(0, 1 - rev.t / 30) : 1;
+      if (k > 0) addLight(s.cx, ry, 140 + 160 * k, 1.6 * k * k, k > 0.6 ? [1, 0.95, 0.85] : [1, 0.75, 0.45]);   // the blast
+      for (let i = 0; i < 3; i++) addLight(reelX(i), ry, 60, (0.28 + 0.12 * Math.sin(tick * 0.4 + i * 2)) * fade, [1, 0.15, 0.25]);
+      const on = (tick >> 2) & 1;                                       // marquee bulbs flashing
+      addLight(s.cx - 80 * z, s.cy - 84 * z, 60, (on ? 0.6 : 0.2) * fade, [1, 0.85, 0.4]);
+      addLight(s.cx + 80 * z, s.cy - 84 * z, 60, (on ? 0.2 : 0.6) * fade, [1, 0.85, 0.4]);
+      for (const f of s.flares) { const e = 1 - f.t / 24; addLight(f.x, f.y, 70 + 40 * (1 - e), 1.1 * e * e * fade, f.rgb); }
+    }
+  }
   const sk = equipped();                                                // glowing skins light up their surroundings
   if (sk.glow && state !== 'over') addLight(BIRD_X, bird.y, sk.tier === 'dev' ? 78 : 64, (sk.tier === 'dev' ? 0.6 : 0.42) + 0.12 * Math.sin(tick * 0.12), sk.glow);
   for (const f of flashes) {                                           // finish line burst: hot flash, warm fade
