@@ -111,16 +111,6 @@ function randomName() {
   let n; do n = A[Math.random() * A.length | 0] + ' ' + B[Math.random() * B.length | 0]; while (n.length > 12); return n;
 }
 const cleanName = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
-// Slurs aren't allowed as names (the database refuses them too). Digits that stand in for letters and
-// doubled letters are seen through; a few short words only count on their own.
-const BAD_STEMS = /NIGG|NIGA|NIGER|NIGR|NIBBA|FAGGOT|FAGOT|RETARD|TRANNY|CHINK|KYKE|BEANER|WETBACK|HITLER|NAZI/;
-const BAD_WORDS = /(^|[^A-Z])(FAGS?|KIKES?|SPICS?|COONS?|GOOKS?|DYKES?|PAKIS?|CUNTS?)([^A-Z]|$)/;
-function badName(n) {
-  const t = String(n || '').toUpperCase().replace(/[0134578@$9]/g, c => ({ 0: 'O', 1: 'I', 3: 'E', 4: 'A', 5: 'S', 7: 'T', 8: 'B', '@': 'A', $: 'S', 9: 'G' })[c]);
-  const flat = t.replace(/[^A-Z]/g, ''), col = flat.replace(/(.)\1+/g, '$1');
-  return BAD_STEMS.test(flat) || /NIGA|NIGER|NIGR|FAGOT/.test(col) || BAD_WORDS.test(t);
-}
-const shownName = s => { const n = cleanName(s); return badName(n) ? 'BIRD' : n; };   // other players' names, as shown
 let idStore = {}; try { idStore = JSON.parse(localStorage.getItem('slappy-id') || '{}'); } catch {}
 const player = {
   id: SAVED.pid || idStore.pid || newUUID(),
@@ -986,7 +976,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 17;
-const BUILD = '1012-27';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-26';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 17, title: 'TRAILS', items: [
     { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
@@ -1106,7 +1096,7 @@ function setupGoals() {
   if (raceOn()) return;
   if (best > 0) goals.push({ kind: 'best', score: best });
   const top = LB_ON && lb.data.week && lb.data.week.rows && lb.data.week.rows[0];
-  if (top && !top.me && top.score > 0) goals.push({ kind: 'week', score: top.score, name: shownName(top.name) || 'PLAYER', dev: top.dev });
+  if (top && !top.me && top.score > 0) goals.push({ kind: 'week', score: top.score, name: cleanName(top.name) || 'PLAYER', dev: top.dev });
 }
 function checkGoals() {
   for (const gl of goals) if (!gl.done && score > gl.score) { gl.done = true; celebrate(gl); }
@@ -2187,8 +2177,8 @@ function raceMsg(ev, d) {
   const o = race.opp;
   if (o && d.id && d.id !== o.id) return;                       // a third phone in the room: ignore it
   if (ev === 'hello' || ev === 'hi') {
-    if (!o) race.opp = { id: d.id, name: shownName(d.name) || 'PLAYER', d: 0, y: 240, r: 0, s: 0, done: false, left: false, ready: false, recvAt: performance.now(), dy: 240 };
-    else { o.name = shownName(d.name) || o.name; o.left = false; }
+    if (!o) race.opp = { id: d.id, name: cleanName(d.name) || 'PLAYER', d: 0, y: 240, r: 0, s: 0, done: false, left: false, ready: false, recvAt: performance.now(), dy: 240 };
+    else { o.name = cleanName(d.name) || o.name; o.left = false; }
     race.opp.skin = SKINS.some(k => k.id === d.skin) ? d.skin : null;
     if (ev === 'hello') raceSend('hi', { name: player.name, role: race.role, skin: equipped().id });
     if (!o) sfx('blip', true);
@@ -2957,7 +2947,7 @@ function drawLB() {
       if (extra && i === d.rows.length - 1) {                  // dots between the top and your own row
         for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly - 12, 4, 4); }
       }
-      const nm = shownName(r.name) || 'PLAYER';
+      const nm = cleanName(r.name) || 'PLAYER';
       if (r.dev) devRowBack(x + 8, ly - 4, w - 16, 22);
       else if (r.me) { g.fillStyle = '#fff8d8'; g.fillRect(x + 8, ly - 4, w - 16, 22); }
       if (r.me) {                                  // you: pulsing orange outline + an arrow at the panel edge
@@ -3073,7 +3063,6 @@ function closeNameBox(ok) {
   if (boxMode === 'welcome') { player.picked = true; save(); }   // asked once, whatever the answer
   const n = ok ? cleanName(inp.value) : '';
   if (!n || n === player.name) return done();
-  if (badName(n)) { nameMsg('PLEASE PICK ANOTHER NAME'); sfx('blip', false); inp.focus(); inp.select(); return; }
   if (!LB_ON) { player.name = n; save(); sfx('blip', true); return done(); }
   // names are unique: ask the server first, so a taken name can be refused right here
   nameMsg('CHECKING...');
