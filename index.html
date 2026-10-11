@@ -814,62 +814,70 @@ function pcircle(cx, cy, r, col) {
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 14;
 const PATCH_NOTES = [
-  { title: 'NEW BIRD', items: [
+  { v: 14, title: 'NEW BIRD', items: [
     { h: 'MEET ROOKIE', col: '#6a5c4a', t: 'EVERYONE NOW STARTS AS A PLAIN GREY BIRD. DO CHALLENGES TO EARN BETTER SKINS!' },
     { h: 'WHERE IS YELLOW?', col: '#c8860c', t: 'THE YELLOW BIRD IS NOW A SECRET SKIN. CHECK SKINS FOR A HINT...' },
   ] },
-  { title: 'SKINS', items: [
+  { v: 13, title: 'SKINS', items: [
     { h: 'EARN NEW LOOKS', col: '#e86a17', t: 'TAP SKINS TO SEE 13 SKINS. EACH ONE UNLOCKS WITH A CHALLENGE.' },
     { h: 'THE GRIND', col: '#c8860c', t: 'GET THEM ALL AND BEAT EVERY BOSS FOR GOLD. THEN PLATINUM, DIAMOND AND DARK MATTER. GOOD LUCK!' },
   ] },
-  { title: '1V1 RACE', items: [
+  { v: 12, title: '1V1 RACE', items: [
     { h: 'RACE A FRIEND', col: '#3a90d8', t: 'TAP RACE AND CREATE A ROOM. YOUR FRIEND JOINS WITH THE 4 LETTER CODE ON THEIR PHONE.' },
     { h: 'SAME PIPES LIVE', col: '#1a5a90', t: 'YOU FLY THE SAME COURSE AND SEE EACH OTHER AS A BLUE GHOST. LAST BIRD FLYING WINS!' },
   ] },
-  { title: 'NEW PIPES', items: [
+  { v: 11, title: 'NEW PIPES', items: [
     { h: 'BEAT A BOSS', col: '#1c6a90', t: 'EVERY BOSS YOU BEAT UNLOCKS A NEW KIND OF PIPE. MOVING PIPES COME FIRST.' },
     { h: 'AND THEN...', col: '#5c2c98', t: 'CHOMPERS AND THREE BRAND NEW PIPES. KEEP GOING TO FIND THEM ALL!' },
   ] },
-  { title: 'FINISH LINES', items: [
+  { v: 10, title: 'FINISH LINES', items: [
     { h: 'BEAT YOUR BEST', col: '#e86a17', t: 'A FINISH LINE SHOWS WHERE YOUR BEST SCORE ENDS. FLY PAST IT FOR CONFETTI AND APPLAUSE.' },
     { h: 'BEAT THE WEEK', col: '#7a1898', t: 'A GOLD LINE MARKS THE WEEKLY TOP SCORE AND WHO SET IT. CAN YOU PASS THEM?' },
   ] },
-  { title: 'LEADERBOARD', items: [
+  { v: 9, title: 'LEADERBOARD', items: [
     { h: 'BEAT EVERYONE', col: '#e86a17', t: 'YOUR BEST RUNS NOW GO ON A WORLD LEADERBOARD. CHECK THE WEEKLY AND ALL TIME TOP 10.' },
     { h: 'PICK A NAME', col: '#2050b0', t: 'YOU GET A RANDOM BIRD NAME. CHANGE IT IN THE LEADERBOARD OR IN SETTINGS.' },
   ] },
-  { title: 'NEW LOOK', items: [
+  { v: 7, title: 'NEW LOOK', items: [
     { h: 'FRESH PAINT', col: '#e86a17', t: 'BOLD NEW TITLES AND ORANGE BUTTONS. A TAP GUIDE ON THE TITLE SCREEN SHOWS HOW TO FLAP.' },
     { h: 'DYNAMIC LIGHTING', col: '#c2310c', t: 'FIREBALLS EXPLOSIONS AND TOKENS NOW GLOW AND LIGHT UP THE WORLD AROUND THEM.' },
   ] },
-  { title: 'LUCKY SLOTS', items: [
+  { v: 8, title: 'LUCKY SLOTS', items: [
     { h: 'NEW SLOT SCREEN', col: '#f83850', t: 'ALL PRIZES ON ONE TABLE AND A BIG SPIN BUTTON TO TAP.' },
   ] },
-  { title: 'PAUSE', items: [
+  { v: 5, title: 'PAUSE', items: [
     { h: '3 2 1 GO!', col: '#c2310c', t: 'AFTER A PAUSE A COUNTDOWN GIVES YOU TIME TO GET READY BEFORE THE GAME GOES ON.' },
   ] },
-  { title: 'SETTINGS', items: [
+  { v: 4, title: 'SETTINGS', items: [
     { h: 'ONE MENU FOR EVERYTHING', col: '#2050b0', t: 'SOUND AND CRT NOW LIVE IN THE NEW SETTINGS MENU ON THE TITLE SCREEN.' },
     { h: 'SMOOTHER SCREEN', col: '#1f7a30', t: 'THE CRT EFFECT NO LONGER FLICKERS. ON IPHONE THE GAME NOW FILLS THE WHOLE SCREEN.' },
   ] },
-  { title: 'TOKENS', items: [
+  { v: 3, title: 'TOKENS', items: [
     { h: 'SLOTS NOW TAKE TOKENS', col: '#c040e0', t: 'ONE TOKEN BUYS ONE SPIN. NO TOKEN? 50 COINS WORK TOO.' },
     { h: 'CATCH THEM IF YOU CAN', col: '#7a1898', t: 'RARE TOKENS FLY AT YOU BOBBING UP AND DOWN. LOOK FOR THE SPARKLY TRAIL!' },
   ] },
-  { title: 'MORE COINS', items: [
+  { v: 3, title: 'MORE COINS', items: [
     { h: 'ROWS AND ARCS', col: '#c8860c', t: 'COINS NOW COME IN ROWS AND ARCS THROUGH THE GAPS.' },
     { h: 'BIG COINS ARE WORTH 5', col: '#c2310c', t: 'THEY STILL HIDE IN RISKY SPOTS. GO FOR IT OR PLAY IT SAFE?' },
   ] },
-  { title: 'LUCKY SLOTS', items: [
+  { v: 3, title: 'LUCKY SLOTS', items: [
     { h: '3 HEARTS REVIVE YOU', col: '#f83850', t: 'THE PIPES IN FRONT OF YOU BLOW UP AND YOU FLY ON.' },
     { h: 'OTHER PRIZES', col: '#2050b0', t: '777 PAYS 3 TOKENS. BELLS PAY 100 COINS AND COINS PAY 50.' },
   ] },
 ];
-let notesPage = notesSeen < NOTES_VERSION ? 0 : -1;   // -1 = closed
-function nextNotesPage() {
-  if (++notesPage >= PATCH_NOTES.length) { notesPage = -1; notesSeen = NOTES_VERSION; save(); sfx('swoosh'); }
-  else sfx('blip', true);
+PATCH_NOTES.sort((a, b) => b.v - a.v);                // newest first
+// Two ways in: after an update only the NEW pages pop up (one tap to close); from Settings / N every
+// update can be browsed with arrows, newest first.
+let notesMode = 'new', notesList = [], notesRect = null;
+let notesPage = -1;                                     // -1 = closed
+if (notesSeen < NOTES_VERSION) {
+  notesList = notesSeen ? PATCH_NOTES.filter(q => q.v > notesSeen).slice(0, 3) : PATCH_NOTES.slice(0, 1);   // new players: just the latest
+  if (notesList.length) notesPage = 0; else notesSeen = NOTES_VERSION;
 }
+function openNotes() { notesMode = 'all'; notesList = PATCH_NOTES; notesPage = 0; settingsOpen = false; sfx('blip', true); }
+function closeNotes() { notesPage = -1; notesSeen = NOTES_VERSION; save(); sfx('swoosh'); }
+function flipNotes(d) { const n = clamp(notesPage + d, 0, notesList.length - 1); if (n !== notesPage) { notesPage = n; sfx('blip', d > 0); } }
+
 function wrapText(str, max) {
   const out = []; let line = '';
   for (const w of str.split(' ')) { if (line && (line + ' ' + w).length > max) { out.push(line); line = w; } else line = line ? line + ' ' + w : w; }
@@ -1019,7 +1027,7 @@ function flap(src) {
   if (skinsUI.open) { if (src !== 'slap') closeSkins(); return; }
   if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
-  if (notesPage >= 0) { if (state === 'ready') return nextNotesPage(); notesPage = -1; }
+  if (notesPage >= 0) { if (state === 'ready') { if (src !== 'slap') closeNotes(); return; } notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
   if (state === 'slot') { if (slot.t > 30) spin(); return; }
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
@@ -1857,7 +1865,7 @@ function drawSettings() {
       ly += 30;
       continue;
     }
-    if (label === 'PATCH NOTES') { button(bx - 72, ly, 72, 30, 'VIEW', () => { settingsOpen = false; openNotes(); }); ly += 42; continue; }
+    if (label === 'PATCH NOTES') { button(bx - 72, ly, 72, 30, 'VIEW', openNotes); ly += 42; continue; }
     if (label === 'NAME') { const nw = Math.min(tw(player.name) + 24, w - 90); button(bx - nw, ly, nw, 30, player.name, editName); ly += 42; continue; }
     button(bx - 72, ly, 72, 30, on ? 'ON' : 'OFF', act, on);
     ly += 42;
@@ -2143,7 +2151,7 @@ function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side b
   let x = Math.round((LW - tot) / 2);
   items.forEach(([l, act], i) => { button(x, y, ws[i], 30, l, act); x += ws[i] + gap; });
 }
-const openNotes = () => { notesPage = 0; sfx('blip', true); };
+
 
 // ============================================================ skins screen
 const skinsUI = { open: false, sel: null, rect: null };
@@ -2485,19 +2493,22 @@ function placeNameInput() {           // keep the invisible input exactly over t
 
 function notesButton(y) {
   const label = 'PATCH NOTES', w = tw(label) + 28;
-  button(Math.round((LW - w) / 2), y, w, 30, label, () => { notesPage = 0; sfx('blip', true); });
+  button(Math.round((LW - w) / 2), y, w, 30, label, openNotes);
 }
 function drawNotes() {
-  const pg = PATCH_NOTES[notesPage], w = wide ? 460 : LW - 28, x = Math.round((LW - w) / 2);
+  const list = notesList, pg = list[notesPage], w = wide ? 460 : LW - 28, x = Math.round((LW - w) / 2);
+  if (!pg) { notesPage = -1; return; }
   const max = Math.floor((w - 28 + 2) / 12);            // characters that fit between the 14px margins
   const lines = it => ({ h: wrapText(it.h, it.col === '#e0309a' ? max - 3 : max), t: wrapText(it.t, max) });
+  const many = list.length > 1, foot = 52 + (notesMode === 'new' && many ? 34 : 0);
   // every page gets the height of the tallest one, so the panel doesn't jump around
-  const h = Math.max(...PATCH_NOTES.map(q => q.items.reduce((a, it) => { const l = lines(it); return a + 14 + 20 * l.h.length + 18 * l.t.length; }, 110)));
+  const h = Math.max(...list.map(q => q.items.reduce((a, it) => { const l = lines(it); return a + 14 + 20 * l.h.length + 18 * l.t.length; }, 80))) + foot;
   const y = clamp(Math.round(214 - h / 2), 8, Math.max(8, LH - h - 8));
-  buttons = [];                                         // the whole screen turns the page
+  notesRect = { x, y, w, h };
+  buttons = [];
   g.fillStyle = 'rgba(20,12,24,0.5)'; cover();
   drawPanel(x, y, w, h);
-  text('WHAT IS NEW', LW / 2, y + 12, 2, '#e86a17', '#ded895', 0);
+  text(notesMode === 'new' ? 'WHAT IS NEW' : 'UPDATE ' + pg.v, LW / 2, y + 12, 2, '#e86a17', '#ded895', 0);
   text(pg.title, LW / 2, y + 34, Math.min(3, Math.floor((w - 16) / (pg.title.length * 6))), '#fff', '#543847', 2);
   let ly = y + 74;
   for (const it of pg.items) {
@@ -2507,9 +2518,20 @@ function drawNotes() {
     for (const s of l.t) { text(s, x + 14, ly, 2, '#543847', '#ded895', 0, 'l'); ly += 18; }
     ly += 14;
   }
-  text((notesPage + 1) + '/' + PATCH_NOTES.length, x + w - 14, y + h - 24, 2, '#8a7438', '#ded895', 0, 'r');
-  if ((tick / 24 | 0) % 2 === 0)
-    text(ACT + (notesPage < PATCH_NOTES.length - 1 ? ' FOR MORE' : ' TO CLOSE'), x + 14, y + h - 24, 2, '#c2310c', '#ded895', 0, 'l');
+  const by = y + h - 44;
+  const arrows = ay => {                                // ‹ 3/13 ›
+    button(x + 14, ay, 30, 30, '<', () => flipNotes(-1), notesPage > 0);
+    text((notesPage + 1) + '/' + list.length, x + 14 + 30 + 31, ay + 8, 2, '#8a7438', '#000', 0);
+    button(x + 14 + 30 + 62, ay, 30, 30, '>', () => flipNotes(1), notesPage < list.length - 1);
+  };
+  if (notesMode === 'new') {
+    if (many) arrows(by - 36);
+    button(x + 14, by, tw('ALL NOTES') + 22, 30, 'ALL NOTES', () => { notesMode = 'all'; notesList = PATCH_NOTES; notesPage = 0; sfx('blip', true); }, false);
+    button(x + w - 14 - (tw('GOT IT') + 22), by, tw('GOT IT') + 22, 30, 'GOT IT', closeNotes);
+  } else {
+    arrows(by);
+    button(x + w - 14 - (tw('CLOSE') + 22), by, tw('CLOSE') + 22, 30, 'CLOSE', closeNotes);
+  }
 }
 
 function drawScoreboard(cx, py, w) {
@@ -3216,6 +3238,7 @@ addEventListener('keydown', e => {
   audioInit();
   const k = e.code;
   if (['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(k)) { e.preventDefault(); if (!e.repeat) flap('key'); }
+  else if (notesPage >= 0 && (k === 'ArrowLeft' || k === 'ArrowRight')) { e.preventDefault(); flipNotes(k === 'ArrowLeft' ? -1 : 1); }
   else if (k === 'ArrowLeft' || k === 'Minus' || k === 'BracketLeft') { e.preventDefault(); setSens(-1); }
   else if (k === 'ArrowRight' || k === 'Equal' || k === 'BracketRight') { e.preventDefault(); setSens(1); }
   else if (k === 'KeyM') toggleMute();
@@ -3225,10 +3248,10 @@ addEventListener('keydown', e => {
   else if (k === 'KeyR' && RACE_ON && !raceOn() && !race.panel) openRace();
   else if (k === 'KeyK') { if (skinsUI.open) closeSkins(); else openSkins(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (notesPage >= 0) closeNotes(); else if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
-  else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) nextNotesPage(); else { notesPage = 0; sfx('blip', true); } }
+  else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) closeNotes(); else openNotes(); }
 });
 // On phones a swipe from the bottom edge (home / app switcher gesture) starts as a touch on the game.
 // So on menus, while paused, and for touches starting at the bottom edge, a touch only counts when the
@@ -3270,6 +3293,7 @@ function handleTap(cx, cy) {
   if (lb.open) { const q = lb.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeLB(); return; }
   if (race.panel) return;
   if (a2hs.open) { const q = a2hs.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeA2HS(); return; }
+  if (notesPage >= 0 && state === 'ready') { const q = notesRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeNotes(); return; }
   if (skinsUI.open) { const q = skinsUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSkins(); return; }
   flap('click');
 }
