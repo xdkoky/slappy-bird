@@ -2866,27 +2866,37 @@ function drawBossHUD() {
   }
 }
 
-function drawBanner() {
+function drawBanner() {   // a compact pill under the score: says what's new without hiding the pipes
   const b = banner; if (!b) return;
-  const k = Math.min(1, b.t / 8, (b.life - b.t) / 10), cy = 200;
-  const h = Math.round((b.kind === 'warning' ? 92 : 68) * k / 2) * 2;
-  g.fillStyle = b.kind === 'warning' ? 'rgba(150,0,24,0.78)' : b.kind === 'victory' ? 'rgba(40,24,70,0.78)' : 'rgba(30,20,44,0.62)';
-  g.fillRect(0, cy - h / 2, LW, h);
-  if (b.kind === 'warning' && h > 20) {      // scrolling hazard stripes
-    for (const ey of [cy - h / 2, cy + h / 2 - 8]) {
-      g.fillStyle = '#1a1020'; g.fillRect(0, ey, LW, 8);
+  const k = Math.min(1, b.t / 8, (b.life - b.t) / 12), e = 1 - (1 - k) ** 3, warn = b.kind === 'warning';
+  const sc = Math.min(3, Math.floor((LW - 48) / (b.text.length * 6)));
+  const w = Math.max(tw(b.text, sc), b.sub ? tw(b.sub) : 0) + 28, h = b.sub ? 50 : 34;
+  let y = (wide ? 86 : 72) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) + (toasts.length ? 52 : 0);
+  y = Math.round((y - (1 - e) * 14) / 2) * 2;
+  const x = Math.round((LW - w) / 2 / 2) * 2;
+  const near = state === 'play' && bird.y > y - 30 && bird.y < y + h + 30;   // never hide the bird's path
+  g.globalAlpha = e * (near ? 0.35 : 1);
+  g.fillStyle = 'rgba(28,16,40,0.22)'; g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle = warn ? 'rgba(120,0,20,0.72)' : b.kind === 'victory' ? 'rgba(40,24,70,0.66)' : 'rgba(30,20,44,0.55)';
+  g.fillRect(x, y, w, h);
+  g.fillStyle = warn ? '#ff5a4a' : b.kind === 'victory' ? '#ffd23f' : 'rgba(255,248,216,0.7)';
+  g.fillRect(x, y, w, 2); g.fillRect(x, y + h - 2, w, 2);
+  if (warn) {                                   // thin scrolling hazard stripes on both ends
+    g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+    for (const ex of [x, x + w - 10]) {
+      g.fillStyle = '#1a1020'; g.fillRect(ex, y, 10, h);
       g.fillStyle = '#ffd23f';
-      for (let x = -24 + (b.t * 2) % 24; x < LW; x += 24) for (let r = 0; r < 4; r++) g.fillRect(x + r * 2, ey + r * 2, 10, 2);
+      for (let yy = y - 12 + (b.t % 12); yy < y + h; yy += 12) for (let r = 0; r < 5; r++) g.fillRect(ex + r * 2, yy + r * 2, 2, 4);
     }
+    g.restore();
   }
-  if (k < 1) return;
-  const big = b.kind === 'warning' ? (wide ? 6 : 5) : (wide ? 5 : 4);
-  const sc = Math.min(big, Math.floor((LW - 24) / (b.text.length * 6)));
-  if (b.kind !== 'warning' || (b.t >> 3) % 4 !== 3)
-    text(b.text, LW / 2, cy - (b.sub ? 10 : 0) - sc * 3.5, sc, b.kind === 'warning' ? '#fff' : '#ffd23f', '#1a1020', 2);
-  if (b.sub) text(b.sub, LW / 2, cy + sc * 3.5 - 4, 2, '#fff', '#1a1020');
-  if (b.kind === 'warning' && bossesBeaten === 0 && b.t > 40) text(TOUCH ? 'TAP TO HIT THEM BACK!' : 'SLAP ITS FIREBALLS BACK!', LW / 2, cy + h / 2 + 10, 2, '#fff', '#c2310c');
-  if (b.kind === 'warning' && bossesBeaten === 1 && b.t > 40) text('ONLY PINK ONES BOUNCE!', LW / 2, cy + h / 2 + 10, 2, '#fff', '#c0208a');
+  if (!warn || (b.t >> 3) % 4 !== 3) text(b.text, LW / 2, y + 7, sc, warn ? '#fff' : '#ffd23f', '#1a1020', 2);
+  if (b.sub) text(b.sub, LW / 2, y + 7 + sc * 7 + 6, 2, '#fff', '#1a1020');
+  if (warn && b.t > 40 && bossesBeaten < 2) {
+    const hint = bossesBeaten === 0 ? (TOUCH ? 'TAP TO HIT THEM BACK!' : 'SLAP ITS FIREBALLS BACK!') : 'ONLY PINK ONES BOUNCE!';
+    text(hint, LW / 2, y + h + 8, 2, '#fff', bossesBeaten === 0 ? '#c2310c' : '#c0208a');
+  }
+  g.globalAlpha = 1;
 }
 
 // Everything drawn between beginForeground() and endForeground() casts a soft drop shadow onto the
