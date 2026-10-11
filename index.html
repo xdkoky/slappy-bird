@@ -1045,7 +1045,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 19;
-const BUILD = '1012-31';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-32';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 19, title: 'LANGUAGE', items: [
     { h: 'LANGUAGE', col: '#3a90d8', t: 'ENGLISH, MAGYAR, DEUTSCH, ESPAÑOL, FRANÇAIS, ITALIANO, PORTUGUÊS' },
@@ -2145,11 +2145,14 @@ function tapHint(cx, y) {
   if (up) { g.fillStyle = '#543847'; g.fillRect(cx - 12, hy - 8, 2, 6); g.fillRect(cx - 4, hy - 10, 2, 6); g.fillRect(cx + 4, hy - 8, 2, 6); }
   g.drawImage(HAND, cx - 10, hy, 24, 24);
   // red tag pointing at the hand
-  const tw2 = Math.max(48, tw(ACT) + 20), tx = Math.min(cx + 32, LW - tw2 - 6), ty = y + 56, th = 22;   // clear of the hand, on screen
+  // right of the hand pointing left; if a long word doesn't fit there, left of the hand pointing right
+  const tw2 = Math.max(48, tw(ACT) + 20), ty = y + 56, th = 22, right = cx + 32 + tw2 + 6 <= LW;
+  const tx = right ? cx + 32 : cx - 28 - tw2;
   const R = (x, yy, w, h, c) => { g.fillStyle = c; g.fillRect(x, yy, w, h); };
-  for (let i = 0; i < 6; i++) { R(tx - 12 + i * 2, ty + 10 - i * 2, 2, 2 + i * 4, '#fff'); }
+  const tip = (i, w, h, col, inset) => right ? R(tx - 12 + inset + i * 2, ty + 10 - i * 2 + inset / 4, 2, h, col) : R(tx + tw2 + 10 - inset - i * 2, ty + 10 - i * 2 + inset / 4, 2, h, col);
+  for (let i = 0; i < 6; i++) tip(i, 2, 2 + i * 4, '#fff', 0);
   R(tx, ty, tw2, th, '#fff'); R(tx + 2, ty + 2, tw2 - 4, th - 4, '#e8302a');
-  for (let i = 0; i < 5; i++) R(tx - 8 + i * 2, ty + 10 - i * 2 + 1, 2, i * 4, '#e8302a');
+  for (let i = 0; i < 5; i++) tip(i, 2, i * 4, '#e8302a', 4);
   text(ACT, tx + tw2 / 2, ty + 4, 2, '#fff', '#000', 0);
 }
 function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.8; save(); if (!muted) sfx('blip', true); }
