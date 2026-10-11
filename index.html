@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  Slappy Bird - Copyright (c) 2026 xdkoky. All rights reserved.
+  Copying, modifying, republishing or distributing this game or any part of it
+  without written permission is not allowed. See LICENSE.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1045,7 +1050,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 19;
-const BUILD = '1012-33';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-34';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 19, title: 'LANGUAGE', items: [
     { h: 'LANGUAGE', col: '#3a90d8', t: 'ENGLISH, MAGYAR, DEUTSCH, ESPAÑOL, FRANÇAIS, ITALIANO, PORTUGUÊS' },
@@ -2260,6 +2265,7 @@ function drawSettings() {
   }
   button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'DONE', closeSettings);
   text('BUILD ' + BUILD, x + w - 8, y + 6, 1, '#a89868', '#000', 0, 'r');   // so players can tell if they have the latest update
+  text('(C) 2026 XDKOKY. ALL RIGHTS RESERVED.', LW / 2, y + h - 12, 1, '#a89868', '#000', 0);
 }
 
 // ============================================================ 1v1 race (two phones, live)

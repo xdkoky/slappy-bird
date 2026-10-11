@@ -1,3 +1,4 @@
+-- Slappy Bird - Copyright (c) 2026 xdkoky. All rights reserved. See LICENSE.
 -- ============================================================ friends
 -- Friend codes, friend requests (they must be accepted) and a head-to-head race record per pair.
 alter table public.players add column if not exists code text;

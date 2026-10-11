@@ -1,3 +1,4 @@
+-- Slappy Bird - Copyright (c) 2026 xdkoky. All rights reserved. See LICENSE.
 -- Slappy Bird leaderboard. Paste this whole file into Supabase: SQL Editor -> New query -> Run.
 -- Safe to run again: it only adds what's missing, keeps every score, and replaces the functions.
 --
