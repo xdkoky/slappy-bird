@@ -44,6 +44,7 @@ create unique index if not exists players_name_key on public.players (name);
 -- Old versions of the functions (their return types change below).
 drop function if exists public.submit_score(uuid, text, text, int);
 drop function if exists public.leaderboard(text, uuid);
+drop function if exists public.leaderboard(text, uuid, int);
 
 -- Record a finished run (also used with score 0 to set or change the player's name).
 -- Returns the name actually stored: if the requested name is taken (or reserved for the developer)
@@ -100,8 +101,9 @@ begin
   return nm;
 end $$;
 
--- Top 10 for 'week' (resets Mondays 00:00 UTC) or 'all', plus the asking player's own row.
-create function public.leaderboard(p_kind text, p_id uuid default null)
+-- The top p_limit (10 by default, at most 100) for 'week' (resets Mondays 00:00 UTC) or 'all',
+-- plus the asking player's own row.
+create function public.leaderboard(p_kind text, p_id uuid default null, p_limit int default 10)
 returns table (rank bigint, name text, score int, me boolean, dev boolean)
 language sql stable security definer
 set search_path = public
@@ -116,10 +118,10 @@ as $$
     select id, name, dev, score, rank() over (order by score desc) as rk, row_number() over (order by score desc, at) as rn
     from b where score > 0
   )
-  select rk, name, score, coalesce(id = p_id, false), dev from r where rn <= 10 or id = p_id order by rn;
+  select rk, name, score, coalesce(id = p_id, false), dev from r where rn <= least(greatest(coalesce(p_limit, 10), 1), 100) or id = p_id order by rn;
 $$;
 
 revoke all on function public.submit_score(uuid, text, text, int) from public;
-revoke all on function public.leaderboard(text, uuid) from public;
+revoke all on function public.leaderboard(text, uuid, int) from public;
 grant execute on function public.submit_score(uuid, text, text, int) to anon, authenticated;
-grant execute on function public.leaderboard(text, uuid) to anon, authenticated;
+grant execute on function public.leaderboard(text, uuid, int) to anon, authenticated;

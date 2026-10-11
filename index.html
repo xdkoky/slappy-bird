@@ -867,7 +867,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 15;
-const BUILD = '1012-20';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-21';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 15, title: 'HOMEBODY', items: [
     { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
@@ -2207,8 +2207,12 @@ function drawRacePanel() {
 }
 
 // ============================================================ online leaderboard
-// Weekly (resets Mondays 00:00 UTC) and all-time top 10, shared by everyone, via Supabase.
-const lb = { open: false, tab: 'week', rect: null, data: { week: null, all: null }, busy: { week: false, all: false } };
+// Weekly (resets Mondays 00:00 UTC) and all-time top 100, shared by everyone, via Supabase.
+const lb = { open: false, tab: 'week', rect: null, data: { week: null, all: null }, busy: { week: false, all: false },
+  scroll: { week: null, all: null }, vel: 0, list: null };   // scroll: null = not placed yet (jumps to your row)
+const LB_ROWS = 100, LB_ROW = 22;
+let lbDrag = null;
+function lbScrollBy(d) { lb.scroll[lb.tab] = (lb.scroll[lb.tab] || 0) + d; lb.vel = 0; }
 function lbCall(fn, body) {
   return fetch(LB_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
     method: 'POST', body: JSON.stringify(body),
@@ -2241,9 +2245,11 @@ function lbLoad() {
   for (const kind of ['week', 'all']) {
     if (lb.busy[kind]) continue;
     lb.busy[kind] = true;
-    lbCall('leaderboard', { p_kind: kind, p_id: player.id })
+    let limit = LB_ROWS;
+    lbCall('leaderboard', { p_kind: kind, p_id: player.id, p_limit: LB_ROWS })
+      .catch(e => { if (e && e.status >= 400 && e.status < 500) { limit = 10; return lbCall('leaderboard', { p_kind: kind, p_id: player.id }); } throw e; })   // database not updated yet
       .then(rows => {
-        lb.data[kind] = { rows: rows || [], t: performance.now() };
+        lb.data[kind] = { rows: rows || [], limit, t: performance.now() };
         if ((rows || []).some(r => r.me && r.dev) && !player.isDev) { player.isDev = true; save(); checkSkins(); }
       })
       .catch(() => { if (!lb.data[kind]) lb.data[kind] = { err: true }; })
@@ -2252,7 +2258,7 @@ function lbLoad() {
 }
 function openLB() {
   if (!LB_ON || !settingsAllowed()) return;
-  lb.open = true; notesPage = -1; settingsOpen = false; sfx('blip', true);
+  lb.open = true; lb.scroll = { week: null, all: null }; lb.vel = 0; notesPage = -1; settingsOpen = false; sfx('blip', true);
   lbFlush();
   if (!lb.data.week || !lb.data.all || lb.data.week.err || performance.now() - (lb.data.week.t || 0) > 20000) lbLoad();
 }
@@ -2474,11 +2480,24 @@ function drawLB() {
   else if (d.err) { text('NO CONNECTION', LW / 2, ly0 + 90, 2, '#c2310c', '#000', 0); text('TRY AGAIN LATER', LW / 2, ly0 + 112, 2, '#8a7438', '#000', 0); }
   else if (!d.rows.length) text(lb.tab === 'week' ? 'NO SCORES THIS WEEK' : 'NO SCORES YET', LW / 2, ly0 + 100, 2, '#8a7438', '#000', 0);
   else {
-    let ly = ly0;
+    // the list scrolls inside the panel: drag it, use the mouse wheel or the arrow keys
+    const top = ly0 - 6, bot = y + h - 98, view = bot - top;
+    const extra = d.rows.length > (d.limit || 10);           // your own row, outside the top
+    const offs = d.rows.map((r, i) => i * LB_ROW + (extra && i === d.rows.length - 1 ? 18 : 0));
+    const contentH = d.rows.length * LB_ROW + (extra ? 18 : 0) + 4, maxS = Math.max(0, contentH - view);
+    lb.list = { x, y: top, w, h: view };
+    if (lb.scroll[lb.tab] == null) {                           // first look: centre your row if it's in the list but out of view
+      const mi = d.rows.findIndex((r, i) => r.me && !(extra && i === d.rows.length - 1));
+      lb.scroll[lb.tab] = mi >= 0 && offs[mi] + LB_ROW + 6 > view ? offs[mi] - view / 2 + LB_ROW : 0;
+    }
+    if (!lbDrag && Math.abs(lb.vel) > 0.2) { lb.scroll[lb.tab] += lb.vel; lb.vel *= 0.92; } else if (!lbDrag) lb.vel = 0;
+    const sc = lb.scroll[lb.tab] = clamp(lb.scroll[lb.tab], 0, maxS);
+    g.save(); g.beginPath(); g.rect(x - 14, top, w + 28, view); g.clip();
     d.rows.forEach((r, i) => {
-      if (i === 10) {                        // our own row, outside the top 10
-        for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly + 6, 4, 4); }
-        ly += 18;
+      const ly = Math.round(top + 6 + offs[i] - sc);
+      if (ly < top - LB_ROW || ly > bot + 4) return;
+      if (extra && i === d.rows.length - 1) {                  // dots between the top and your own row
+        for (let k = 0; k < 3; k++) { g.fillStyle = '#8a7438'; g.fillRect(LW / 2 - 10 + k * 8, ly - 12, 4, 4); }
       }
       const nm = cleanName(r.name) || 'PLAYER';
       if (r.dev) devRowBack(x + 8, ly - 3, w - 16, 20);
@@ -2492,12 +2511,22 @@ function drawLB() {
       }
       const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
-      text(r.rank, x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
+      text(r.rank, r.rank > 99 ? x + 21 : x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
       if (r.dev) devName(nm, x + 40, ly, x + w - 20 - tw(String(r.score)));
       else text(nm, x + 40, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
-      text(r.score, x + w - 14, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
-      ly += 22;
+      text(r.score, x + w - 16, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
     });
+    g.restore();
+    if (maxS > 0) {                                            // soft edges + a scrollbar when there's more
+      for (let k = 0; k < 4; k++) {
+        g.fillStyle = `rgba(222,216,149,${0.8 - k * 0.2})`;
+        if (sc > 0) g.fillRect(x + 4, top + k * 3, w - 8, 3);
+        if (sc < maxS) g.fillRect(x + 4, bot - 3 - k * 3, w - 8, 3);
+      }
+      const th = Math.max(20, Math.round(view * view / contentH)), ty = top + Math.round((view - th) * sc / maxS);
+      g.fillStyle = '#c9b968'; g.fillRect(x + w - 8, top, 3, view);
+      g.fillStyle = '#8a7438'; g.fillRect(x + w - 8, ty, 3, th);
+    }
   }
   // your name + edit, and close
   g.fillStyle = '#c9b968'; g.fillRect(x + 10, y + h - 92, w - 20, 2);
@@ -3421,7 +3450,8 @@ addEventListener('keydown', e => {
   if (nameBoxOpen) { if (e.code === 'Escape') closeNameBox(false); return; }   // typing a name
   audioInit();
   const k = e.code;
-  if (['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(k)) { e.preventDefault(); if (!e.repeat) flap('key'); }
+  if (lb.open && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); lbScrollBy(k === 'ArrowUp' ? -LB_ROW * 2 : LB_ROW * 2); }
+  else if (['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(k)) { e.preventDefault(); if (!e.repeat) flap('key'); }
   else if (notesPage >= 0 && (k === 'ArrowLeft' || k === 'ArrowRight')) { e.preventDefault(); flipNotes(k === 'ArrowLeft' ? -1 : 1); }
   else if (k === 'ArrowLeft' || k === 'Minus' || k === 'BracketLeft') { e.preventDefault(); setSens(-1); }
   else if (k === 'ArrowRight' || k === 'Equal' || k === 'BracketRight') { e.preventDefault(); setSens(1); }
@@ -3445,6 +3475,10 @@ const EDGE_PX = 44;   // CSS px at the bottom of the screen where the system ges
 screen.addEventListener('pointerdown', e => {
   audioInit();
   const r = screen.getBoundingClientRect();
+  if (lb.open && lb.list) {                       // grabbing the leaderboard list to scroll it
+    const L = lb.list, lx = (e.clientX - r.left) / r.width * LW, ly = (e.clientY - r.top) / r.height * (LH + TOP + OVER) - TOP;
+    if (lx >= L.x && lx < L.x + L.w && ly >= L.y && ly < L.y + L.h) lbDrag = { id: e.pointerId, y: e.clientY, s0: lb.scroll[lb.tab] || 0, k: (LH + TOP + OVER) / r.height, last: e.clientY, t: performance.now() };
+  }
   const atEdge = visH - e.clientY < EDGE_PX;
   if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
@@ -3453,14 +3487,21 @@ screen.addEventListener('pointerdown', e => {
   handleTap(e.clientX, e.clientY);
 });
 screen.addEventListener('pointermove', e => {
+  if (lbDrag && lbDrag.id === e.pointerId) {
+    const now = performance.now(), dt = Math.max(1, now - lbDrag.t);
+    lb.vel = -(e.clientY - lbDrag.last) * lbDrag.k * 16 / dt; lbDrag.last = e.clientY; lbDrag.t = now;
+    lb.scroll[lb.tab] = lbDrag.s0 - (e.clientY - lbDrag.y) * lbDrag.k;
+  }
   if (heldTap && heldTap.id === e.pointerId && Math.hypot(e.clientX - heldTap.x, e.clientY - heldTap.y) > 12) heldTap = null;   // a swipe, not a tap
 });
 screen.addEventListener('pointerup', e => {
+  if (lbDrag && lbDrag.id === e.pointerId) { if (performance.now() - lbDrag.t > 80) lb.vel = 0; lbDrag = null; }   // a flick keeps gliding
   const h = heldTap; heldTap = null;
   if (!h || h.id !== e.pointerId || document.hidden || Math.hypot(e.clientX - h.x, e.clientY - h.y) > 12 || performance.now() - h.t > 600) return;
   handleTap(h.x, h.y);
 });
-screen.addEventListener('pointercancel', () => { heldTap = null; });
+screen.addEventListener('pointercancel', () => { heldTap = null; lbDrag = null; });
+addEventListener('wheel', e => { if (lb.open) { e.preventDefault(); lbScrollBy(e.deltaY * (e.deltaMode ? 22 : 0.5)); } }, { passive: false });
 document.addEventListener('visibilitychange', () => { heldTap = null; });
 function handleTap(cx, cy) {
   const r = screen.getBoundingClientRect(), x = (cx - r.left) / r.width * LW, y = (cy - r.top) / r.height * (LH + TOP + OVER) - TOP;
