@@ -1789,7 +1789,7 @@ function pauseButton(x, y) {
   g.fillStyle = '#fff'; g.fillRect(x + 9, y + 9 + dy, 4, 12); g.fillRect(x + 17, y + 9 + dy, 4, 12);
 }
 // "TAP" tutorial for the title screen: ghost bird flapping up, arrow, tapping hand and a red tag.
-const GHOST = { k:'#ffffff', y:'#e8f8ff', Y:'#ffffff', o:'#d8f0ff', w:'#ffffff', v:'#ffffff', r:'#e8f8ff', R:'#d8f0ff' };
+const GHOST = { k:'#7a9ab8', y:'#eef8ff', Y:'#ffffff', o:'#d4ecfa', w:'#ffffff', v:'#ffffff', r:'#cfe6f6', R:'#b4d4ec' };
 const ghostBird = (() => { const c = sprite(BIRD, GHOST); c.getContext('2d').drawImage(sprite(WING, GHOST), 0, 3); return c; })();
 const HAND = sprite([
   '...kk.....',
@@ -1808,14 +1808,14 @@ const HAND = sprite([
 const ARROW = sprite(['..k..', '.kkk.', 'kkkkk', '.kkk.', '.kkk.']);
 function tapHint(cx, y) {
   const up = (tick / 30 | 0) % 2 === 0, bob = up ? -4 : 0;
-  g.globalAlpha = 0.55; g.drawImage(ghostBird, cx - 18, y + bob, 36, 24); g.globalAlpha = 1;
+  g.globalAlpha = 0.8; g.drawImage(ghostBird, cx - 18, y + bob, 36, 24); g.globalAlpha = 1;
   if (up) { g.fillStyle = '#7c7c8c'; g.fillRect(cx - 28, y + 22, 6, 2); g.fillRect(cx - 24, y + 28, 6, 2); }
   g.drawImage(ARROW, cx - 5, y + 34, 10, 10);
   const hy = y + 54 + (up ? 2 : 0);
   if (up) { g.fillStyle = '#543847'; g.fillRect(cx - 12, hy - 8, 2, 6); g.fillRect(cx - 4, hy - 10, 2, 6); g.fillRect(cx + 4, hy - 8, 2, 6); }
   g.drawImage(HAND, cx - 10, hy, 24, 24);
   // red tag pointing at the hand
-  const tx = cx + 22, ty = y + 56, tw2 = 48, th = 22;
+  const tx = Math.min(cx + 32, LW - 54), ty = y + 56, tw2 = 48, th = 22;   // clear of the hand, on screen
   const R = (x, yy, w, h, c) => { g.fillStyle = c; g.fillRect(x, yy, w, h); };
   for (let i = 0; i < 6; i++) { R(tx - 12 + i * 2, ty + 10 - i * 2, 2, 2 + i * 4, '#fff'); }
   R(tx, ty, tw2, th, '#fff'); R(tx + 2, ty + 2, tw2 - 4, th - 4, '#e8302a');
