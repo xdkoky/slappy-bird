@@ -2301,7 +2301,8 @@ function skinsButtonBadge() {     // red NEW dot on the SKINS button
 function drawToasts() {           // "NEW SKIN!" cards sliding in at the top
   toasts.slice(0, 1).forEach(tt => {
     const k = skinById(tt.id), e = Math.min(1, tt.t / 12, (170 - tt.t) / 14), w = Math.max(tw(k.name) + 70, 190), x = Math.round((LW - w) / 2);
-    const y = Math.round(-60 + e * (wide ? 96 : 102));
+    const live = state === 'play' || state === 'dying' || state === 'revive';   // in a run: below the score; otherwise above the menus
+    const y0 = live ? (wide ? 90 : 82) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) : (wide ? 18 : 12), y = Math.round(-60 + e * (y0 + 60));
     drawPanel(x, y, w, 44);
     g.drawImage(skinFrame(k.id, [0, 1, 2, 1][(tick / 6 | 0) % 4]), x + 8, y + 9, 36, 26);
     text('NEW SKIN!', x + 52, y + 6, 2, '#e86a17', '#000', 0, 'l');
@@ -2932,7 +2933,7 @@ function drawBanner() {   // a compact pill under the score: says what's new wit
   const k = Math.min(1, b.t / 8, (b.life - b.t) / 12), e = 1 - (1 - k) ** 3, warn = b.kind === 'warning';
   const sc = Math.min(3, Math.floor((LW - 48) / (b.text.length * 6)));
   const w = Math.max(tw(b.text, sc), b.sub ? tw(b.sub) : 0) + 28, h = b.sub ? 50 : 34;
-  let y = (wide ? 86 : 72) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) + (toasts.length ? 52 : 0);
+  let y = (wide ? 86 : 72) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) + (toasts.length ? 62 : 0);
   y = Math.round((y - (1 - e) * 14) / 2) * 2;
   const x = Math.round((LW - w) / 2 / 2) * 2;
   const near = state === 'play' && bird.y > y - 30 && bird.y < y + h + 30;   // never hide the bird's path
@@ -3049,7 +3050,6 @@ function draw() {
   if (raceOn()) drawRaceGhost();
   endForeground();
   drawConfetti();
-  if (toasts.length) drawToasts();
   if (hover > 0 && state === 'play') {
     const k = hover / HOVER_MAX, bw = 80, bx = BIRD_X - bw / 2, by = Math.round(bird.y) + 24;
     if ((tick / 20 | 0) % 2 === 0) text(TOUCH ? 'TAP TO FLY' : 'FLAP TO FLY', clamp(BIRD_X, 70, LW - 70), Math.round(bird.y) - 46, 2, '#fff', '#543847');
@@ -3071,6 +3071,7 @@ function draw() {
   if (state === 'play' || state === 'dying') drawBossHUD();
   if (state === 'slot' || (state === 'revive' && rev.t < 30)) drawSlot();
   drawBanner();
+  if (toasts.length) drawToasts();   // above the HUD so the score never covers it
   if (notesPage >= 0 && state === 'ready') drawNotes();
   if (settingsOpen) drawSettings();
   if (lb.open) drawLB();
