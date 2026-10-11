@@ -692,6 +692,10 @@ const SKINS = [
   { id: 'homebody', name: 'HOMEBODY',      tier: 'base', bonus: true, anim: true, pal: { k: '#0c2448', o: '#ffffff', v: '#e8f4ff', r: '#ffb030', R: '#d87a10' },
     pat: (x, y, ch, t) => ch === 'o' ? null : Math.sin((x - t * 0.06) * 0.8) + Math.sin(y * 1.3 + x * 0.35 - t * 0.03) > 1.2 ? '#ffffff' : y < 4 ? '#1a4cb0' : y < 8 ? '#2a6ad8' : '#5090f0',
     how: 'PLAY FROM YOUR HOME SCREEN', need: () => [stats.homescreen ? 1 : 0, 1] },
+  // for a 7 day streak of daily play: a sunrise from pink at the top to gold at the bottom
+  { id: 'sunrise',  name: 'SUNRISE',       tier: 'base', bonus: true, pal: { k: '#5a1830', o: '#fff0d0', v: '#fff4e0', r: '#ff5a3a', R: '#c03020' },
+    pat: (x, y, ch) => ch === 'o' ? null : y < 4 ? '#ff5a8a' : y < 7 ? '#ff7a5a' : y < 10 ? '#ffa040' : '#ffd050',
+    how: 'PLAY 7 DAYS IN A ROW', need: () => [stats.bestStreak || 0, 7] },
   // mastery: in order, each with several requirements
   { id: 'gold',     name: 'GOLD',          tier: 'gold', pal: { k: '#6a4808', y: '#f8c81c', Y: '#fff4a0', o: '#d8a010', v: '#fff0b0', r: '#fff4a0', R: '#d8a010' }, sheen: '#fffbe0',
     reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'rookie' && !k.bonus && (!k.race || RACE_ON));
@@ -866,9 +870,13 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 15;
-const BUILD = '1012-21';   // bump with sw.js VERSION on every update (shown in settings)
+const NOTES_VERSION = 16;
+const BUILD = '1012-22';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
+  { v: 16, title: 'DAILY', items: [
+    { h: 'DAILY WORD', col: '#7a60e0', t: 'FIND THE LETTERS OF THE DAY IN THE PIPE GAPS AND SPELL THE WORD FOR TOKENS!' },
+    { h: 'MISSIONS AND STREAKS', col: '#e86a17', t: 'THREE NEW MISSIONS EVERY DAY AND A REWARD FOR EVERY DAY IN A ROW. TAP DAILY!' },
+  ] },
   { v: 15, title: 'HOMEBODY', items: [
     { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
     { h: 'DRUMROLL PLEASE', col: '#f83850', t: 'TWO HEARTS ON THE SLOTS NOW GET A DRUMROLL. AND BANNERS ARE SMALLER SO YOU CAN SEE THE PIPES.' },
@@ -1077,7 +1085,7 @@ function saveRun() {
     if (raceOn() || !['play', 'dying', 'slot', 'revive'].includes(state)) { localStorage.removeItem(RUN_KEY); return; }
     const live = pipes.slice();
     const r = { v: 1, at: Date.now(), state, score, spawned, passedPipes, nextBossAt, bossesBeaten, hearts, combo, parries, halo, groundX, bgX,
-      bossPending: bossPending || !!boss, shownNew, goals, bird: { y: bird.y, inv: bird.inv },
+      bossPending: bossPending || !!boss, shownNew, goals, rs, bird: { y: bird.y, inv: bird.inv },
       pipes: boss ? [] : live, coins: boss ? [] : coins.filter(c => !c.pipe || live.includes(c.pipe)).map(c => Object.assign({}, c, { pipe: c.pipe ? live.indexOf(c.pipe) : -1 })) };
     if (state === 'slot' && slot) r.slot = { phase: slot.phase, out: slot.out, paid: slot.paid };
     localStorage.setItem(RUN_KEY, JSON.stringify(r));
@@ -1089,7 +1097,7 @@ function loadRun() {
   if (!r || r.v !== 1 || Date.now() - r.at > 7 * 864e5) return;
   reset(); fade = 0;
   ({ score, spawned, passedPipes, nextBossAt, bossesBeaten, hearts, combo, parries, halo, groundX, bgX, bossPending } = r);
-  shownNew = r.shownNew || {}; goals = r.goals || [];
+  shownNew = r.shownNew || {}; goals = r.goals || []; rs = r.rs || newRunStats();
   pipes = r.pipes || [];
   coins = (r.coins || []).map(c => Object.assign(c, { pipe: c.pipe >= 0 ? pipes[c.pipe] : null })).filter(c => c.token || c.pipe);
   bird.y = r.bird.y; bird.inv = r.bird.inv || 0; bird.vy = 0; bird.rot = 0;
@@ -1129,13 +1137,14 @@ function flap(src) {
   if (lb.open) { if (src !== 'slap') closeLB(); return; }
   if (a2hs.open) { if (src !== 'slap') closeA2HS(); return; }
   if (skinsUI.open) { if (src !== 'slap') closeSkins(); return; }
+  if (dailyUI.open) { if (src !== 'slap') closeDaily(); return; }
   if (race.panel || race.phase === 'countdown' || (raceOn() && state === 'over')) return;
   if (paused) return setPaused(false);   // starts the countdown; taps during it are ignored
   if (notesPage >= 0) { if (state === 'ready') { if (src !== 'slap') closeNotes(); return; } notesPage = -1; }
   if (state === 'dying' || state === 'revive') return;
   if (state === 'slot') { if (slot.t > 30) spin(); return; }
   if (state === 'over') { if (overT > 50) { reset(); sfx('swoosh'); } return; }
-  if (state === 'ready') { state = 'play'; setupGoals(); }
+  if (state === 'ready') { state = 'play'; setupGoals(); dailyRunStart(); }
   hover = 0;
   bird.vy = FLAP;
   // a slap/flap while a fireball is close knocks it back
@@ -1262,6 +1271,12 @@ const circRect = (cx, cy, r, x, y, w, h) => {
 // big ones (worth 3) hug a cap or float far off the path between two pipes: go for it or play it safe.
 function addCoins(p, prev, d) {
   if (spawned < 2 || raceOn()) return;
+  const dl = stats.daily;                   // the next letter of the daily word, every 8-12 pipes
+  if (rs && state === 'play' && dl && dl.day === dayKey() && dl.got < dl.word.length && spawned >= rs.letterAt && !coins.some(c => c.letter)) {
+    rs.letterAt = spawned + 8 + (Math.random() * 5 | 0);
+    coins.push({ letter: dl.word[dl.got], pipe: p, dx: 24, dy: 0, mode: 'mid', big: false, ph: 0, x: p.x + 24, y: 0 });
+    return;
+  }
   const add = o => coins.push(Object.assign({ pipe: p, dx: 24, dy: 0, mode: 'mid', big: false, ph: rand(0, 6), x: p.x + 24, y: 0 }, o));
   // rare token: drifts toward the bird between pipes, bobbing up and down
   if (prev && spawned >= 6 && Math.random() < 0.045 && !coins.some(c => c.token)) {
@@ -1294,14 +1309,16 @@ function updateCoins(sp) {
     }
     if (state !== 'play' || (p && p.intro < INTRO)) continue;
     if (c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + 12) {
-      c.dead = true; tokens++; tokenBump = 8; statAdd('tokens'); save();
+      c.dead = true; tokens++; tokenBump = 8; statAdd('tokens'); dq('token'); save();
       popup('+1 TOKEN', c.x, c.y - 20, { sc: 3, fill: '#f0a0ff', ol: '#2a0838', life: 50, vy: -0.6 });
       burst(c.x, c.y, 24, ['#f0a0ff', '#c040e0', '#fff'], 4.5, 24, 4);
       rings.push({ x: c.x, y: c.y, r: 8, dr: 4, life: 16, col: '#f0a0ff' });
       sfx('token'); continue;
     }
+    if (c.letter) { if (Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + 13) { c.dead = true; letterGot(c); } continue; }
     if (!c.token && Math.hypot(c.x - BIRD_X, c.y - bird.y) < BIRD_R + (c.big ? 10 : 7)) {
       const v = c.big ? 5 : 1; c.dead = true; bank += v; coinBump = 8; statAdd('coins', v);
+      dq('coin', v); if (c.big) dq('bigcoin'); if (rs) rs.coins += v;
       popup('+' + v, c.x, c.y - 16, { sc: c.big ? 3 : 2, fill: '#ffe14d', ol: '#7a4a08', life: 30 });
       burst(c.x, c.y, c.big ? 16 : 7, ['#fff4a0', '#f8c81c', '#fff'], c.big ? 3.5 : 2.2, 16);
       if (c.big) rings.push({ x: c.x, y: c.y, r: 6, dr: 3, life: 12, col: '#fff4a0' });
@@ -1339,12 +1356,12 @@ function downed() {
     state = 'slot';
     slot = { t: -30, phase: 'idle', count: 540, msg: '', res: '', pull: -1, jt: 0, spins: 0, suspense: false, lastTick: 0, zoom: 0, resT: 0, flares: [],
       reels: [0, 1, 2].map(() => ({ pos: Math.random() * STRIP.length | 0, from: 0, to: 0, v: 0, t: 0, T1: 0, Td: 0, done: true, bounce: 0 })) };
-  } else { clearRun(); state = 'over'; overT = 0; lbSubmit(score); statAdd('runs'); checkSkins(); }
+  } else { clearRun(); state = 'over'; overT = 0; lbSubmit(score); runEnded(); }
 }
 function spin() {
   const s = slot;
   if (s.phase === 'spin' || s.phase === 'jackpot' || !canSpin()) return;
-  s.paid = tokens > 0 ? 'token' : 'coins';
+  s.paid = tokens > 0 ? 'token' : 'coins'; dq('spin');
   if (tokens > 0) tokens--; else bank -= COINS_PER_SPIN;
   save(); s.spins++;
   s.out = rollOutcome(); s.phase = 'spin'; s.msg = ''; s.res = ''; s.pull = 0;
@@ -1406,12 +1423,13 @@ function resolveSpin() {
   }
   if (!canSpin()) s.count = 150;      // broke: game over after a moment
 }
-function giveUp() { stopDrum(); clearRun(); state = 'over'; overT = 0; slot = null; lbSubmit(score); statAdd('runs'); checkSkins(); }
+function giveUp() { stopDrum(); clearRun(); state = 'over'; overT = 0; slot = null; lbSubmit(score); runEnded(); }
+function runEnded() { statAdd('runs'); if (!raceOn()) { dqRun(); dq('run'); dailyPlayed(); } checkSkins(); }
 
 // ------------------------------------------------------------ revive
 // A beam of light lifts the bird back up, the nearest pipes in front of it blow up, and play resumes.
 function startRevive() {
-  statAdd('revives');
+  statAdd('revives'); dq('revive');
   const ahead = pipes.filter(p => p.x + 52 > BIRD_X - 24).sort((a, b) => a.x - b.x);
   const targets = ahead.slice(0, 1);
   if (ahead[1] && ahead[1].x - BIRD_X < 300) targets.push(ahead[1]);
@@ -1605,6 +1623,7 @@ function updateBoss() {
       setTimeout(() => sfx('victory'), 250);
       if (!raceOn() && !(stats.bossTypes || []).includes(b.def.name)) { stats.bossTypes = [...(stats.bossTypes || []), b.def.name]; statsDirty = true; }
       bossesBeaten++; nextBossAt = spawned + BOSS_EVERY; boss = null;
+      dq('boss'); if (rs && !b.hurt) rs.flawless++;
       statAdd('bosses'); if (bossesBeaten > (stats.maxBossRun || 0) && !raceOn()) { stats.maxBossRun = bossesBeaten; statsDirty = true; }
     }
   }
@@ -1612,7 +1631,7 @@ function updateBoss() {
 
 function parry(s, d) {
   const perfect = d < 34;
-  s.refl = true; s.r = 9; combo++; parries++; statAdd('parries');
+  s.refl = true; s.r = 9; combo++; parries++; statAdd('parries'); dq('parry'); if (rs) rs.combo = Math.max(rs.combo, combo);
   const bx = boss ? boss.x : LW + 50, by = boss ? boss.y : s.y;
   const a = Math.atan2(by - s.y, bx - s.x); s.vx = Math.cos(a) * 9; s.vy = Math.sin(a) * 9;
   hitstop = perfect ? 8 : 5; shake = Math.max(shake, perfect ? 9 : 6);
@@ -1640,6 +1659,7 @@ function hitBoss(s) {
 
 function hurtBird() {
   if (bird.inv > 0) return;
+  if (boss) boss.hurt = true;
   hearts--; combo = 0; bird.inv = 90; shake = Math.max(shake, 9); hurtFlash = 0.55;
   burst(BIRD_X, bird.y, 14, ['#f83850', '#fff', '#f8d81c'], 3.5, 20);
   if (hearts <= 0) crash(false); else sfx('hurt');
@@ -1693,6 +1713,7 @@ function update() {
   tick++;
   if (tick % 30 === 0) checkSkins();
   for (const t of toasts) t.t++; toasts = toasts.filter(t => t.t < 170);
+  if (state === 'play' && tick % 6 === 0) dqRun();
   if (state === 'over' && overT === 60 && LB_ON && !player.picked && !raceOn() && !nameBoxOpen) editName(true);
   if (race.phase !== 'off' || race.panel) raceTick();
   if (hitstop > 0) { hitstop--; updateFX(); return; }                       // impact freeze
@@ -1729,7 +1750,10 @@ function update() {
     for (const p of pipes) {
       p.x -= sp; p.intro++; p.t++; pipeShape(p);
       if (p.intro < INTRO) continue;
-      if (!p.passed && p.x + 24 < BIRD_X) { p.passed = true; score++; passedPipes++; statAdd('pipes'); sfx('point'); }
+      if (!p.passed && p.x + 24 < BIRD_X) {
+        p.passed = true; score++; passedPipes++; statAdd('pipes'); sfx('point'); dq('pipe');
+        if (p.kind !== 'static') { dq('special'); if (rs) { rs.special++; if (p.kind === 'chomp') rs.chomp++; } }
+      }
       if (hitPipe(p)) { crash(false); break; }
     }
     pipes = pipes.filter(p => p.x > -60);
@@ -1831,11 +1855,11 @@ function wideTopBar() {
   text(s, sx + 30, 30, 2, '#fff', '#000', 0, 'l');
 }
 function wideControls() {
-  if (TOUCH) { if (state === 'over') buttonRow(436, [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['SKINS', openSkins], ['SETTINGS', openSettings]], 16); else settingsButton(436); skinsButtonBadge(); return; }
+  if (TOUCH) { if (state === 'over') buttonRow(436, [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['DAILY', openDaily], ['SKINS', openSkins], ['SETTINGS', openSettings]], 16); else settingsButton(436); skinsButtonBadge(); dailyButtonBadge(); return; }
   const y = 438;
   const left = sensorLive() ? 'SENSITIVITY ' + sensLevel : 'NO SENSOR: SPACE OR CLICK TO FLAP';
   const leftW = sensorLive() ? 18 + 4 + 18 + 10 + tw(left) + 14 + 120 : tw(left);
-  const right = [['S', 'SETTINGS', openSettings], ['K', 'SKINS', openSkins], ...(LB_ON ? [['L', 'SCORES', openLB]] : []), ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
+  const right = [['S', 'SETTINGS', openSettings], ['D', 'DAILY', openDaily], ['K', 'SKINS', openSkins], ...(LB_ON ? [['L', 'SCORES', openLB]] : []), ['P', 'PAUSE'], fullscreen ? ['ESC', 'EXIT'] : ['F', 'FULLSCREEN']];
   const rightW = hintsWidth(right), margin = 40, stacked = leftW + rightW + margin * 2 + 40 > LW;
   let lx = stacked ? (LW - leftW) / 2 : margin;
   if (sensorLive()) {
@@ -1944,7 +1968,7 @@ function toggleFullscreen() { native(fullscreen ? 'exitFullscreen' : 'fullscreen
 // ============================================================ settings menu
 // Every option lives here. Opened from the title / game over screen (button or S key).
 let settingsOpen = false, settingsRect = null;
-const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && !skinsUI.open && (state === 'ready' || (state === 'over' && overT > 50));
+const settingsAllowed = () => !raceOn() && !race.panel && !a2hs.open && !skinsUI.open && !dailyUI.open && (state === 'ready' || (state === 'over' && overT > 50));
 function openSettings() { if (!settingsAllowed()) return; a2hs.open = false; skinsUI.open = false; settingsOpen = true; notesPage = -1; lb.open = false; sfx('blip', true); }
 function closeSettings() { settingsOpen = false; sfx('blip', false); }
 function settingsButton(y) {
@@ -2110,7 +2134,7 @@ function raceCheckEnd() {
   if (!gone && !o.done) return;
   race.result = gone ? 'left' : race.myDist > o.d + 0.5 ? 'win' : race.myDist < o.d - 0.5 ? 'lose' : 'draw';
   race.panel = 'done';
-  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); statAdd('racesWon'); checkSkins(); }
+  if (race.result === 'win' || race.result === 'left') { sfx('claps', 1.3); sfx('victory'); spawnConfetti(130, true); statAdd('racesWon'); dq('race'); checkSkins(); }
   else if (race.result === 'lose') sfx('lose');
 }
 function raceRematch() {
@@ -2288,7 +2312,7 @@ function closeSkins() { skinsUI.open = false; sfx('blip', false); }
 const TIER_COL = { secret: '#ffd23f', base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
 function drawSkins() {
   const list = SKINS.filter(k => !k.race || RACE_ON);
-  const cols = wide ? 6 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
+  const cols = wide ? 6 : list.length > 20 ? 5 : 4, w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2), cw = Math.floor((w - 20) / cols), ch = 46;
   const rows = Math.ceil(list.length / cols), h = 54 + rows * ch + 236;
   const y = clamp(Math.round((Math.min(LH, 600) - h) / 2), 6, Math.max(6, LH - h - 6));
   skinsUI.rect = { x, y, w, h };
@@ -2365,12 +2389,239 @@ function skinsButtonBadge() {     // red NEW dot on the SKINS button
   const bx = b.x + b.w - 10, by = b.y + 4;
   pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(n, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
 }
-function drawToasts() {           // "NEW SKIN!" cards sliding in at the top
+
+// ============================================================ daily challenges
+// Every local day: a word to spell with letters found in pipe gaps, and three missions (easy, medium,
+// hard; a bigger one at weekends), all paying slot tokens. The picks come from the date, so friends get
+// the same ones. Playing on consecutive days builds a streak with its own reward (SUNRISE skin at 7).
+const DAILY_WORDS = ['SLAP', 'FLAP', 'BIRD', 'WING', 'PIPE', 'CROW', 'BEAK', 'NEST', 'COIN', 'FLOCK', 'SPIN', 'SWOOP'];
+const WEEKEND_WORDS = ['JACKPOT', 'FEATHER', 'SLAPPY', 'TOKENS', 'PARROT'];
+// ev: counted across the whole day; run: best value reached in a single run. req: only offered when possible.
+const MISSIONS = [
+  { id: 'e_pipes',   tier: 0, t: 'PASS 50 PIPES', n: 50, ev: 'pipe' },
+  { id: 'e_coins',   tier: 0, t: 'COLLECT 30 COINS', n: 30, ev: 'coin' },
+  { id: 'e_runs',    tier: 0, t: 'PLAY 5 RUNS', n: 5, ev: 'run' },
+  { id: 'e_spin',    tier: 0, t: 'SPIN THE SLOTS', n: 1, ev: 'spin' },
+  { id: 'e_score',   tier: 0, t: 'SCORE 10 IN ONE RUN', n: 10, run: () => score },
+  { id: 'e_big',     tier: 0, t: 'GRAB A BIG COIN', n: 1, ev: 'bigcoin' },
+  { id: 'e_special', tier: 0, t: 'PASS 10 SPECIAL PIPES', n: 10, ev: 'special', req: () => (stats.maxBossRun || 0) >= 1 },
+  { id: 'm_score',   tier: 1, t: 'SCORE 20 IN ONE RUN', n: 20, run: () => score },
+  { id: 'm_parry',   tier: 1, t: 'PARRY 5 FIREBALLS', n: 5, ev: 'parry' },
+  { id: 'm_token',   tier: 1, t: 'CATCH A TOKEN', n: 1, ev: 'token' },
+  { id: 'm_boss',    tier: 1, t: 'BEAT A BOSS', n: 1, ev: 'boss' },
+  { id: 'm_coins',   tier: 1, t: 'COLLECT 15 COINS IN ONE RUN', n: 15, run: r => r.coins },
+  { id: 'm_chomp',   tier: 1, t: 'PASS 5 CHOMPERS IN ONE RUN', n: 5, run: r => r.chomp, req: () => (stats.maxBossRun || 0) >= 2 },
+  { id: 'm_revive',  tier: 1, t: 'GET REVIVED BY THE SLOTS', n: 1, ev: 'revive' },
+  { id: 'h_score',   tier: 2, t: 'SCORE 50 IN ONE RUN', n: 50, run: () => score },
+  { id: 'h_flaw',    tier: 2, t: 'BEAT 2 BOSSES IN ONE RUN WITHOUT A HIT', n: 2, run: r => r.flawless },
+  { id: 'h_combo',   tier: 2, t: 'PARRY 5 FIREBALLS IN A ROW', n: 5, run: r => r.combo },
+  { id: 'h_bosses',  tier: 2, t: 'BEAT 3 BOSSES IN ONE RUN', n: 3, run: () => bossesBeaten },
+  { id: 'h_coins',   tier: 2, t: 'COLLECT 60 COINS IN ONE RUN', n: 60, run: r => r.coins },
+  { id: 'h_nocoin',  tier: 2, t: 'SCORE 25 WITHOUT ANY COINS', n: 25, run: r => r.coins ? 0 : score },
+  { id: 'h_best',    tier: 2, t: 'BEAT YOUR BEST SCORE', n: 1, run: r => r.startBest >= 10 && score > r.startBest ? 1 : 0, req: () => best >= 10 },
+  { id: 'h_special', tier: 2, t: 'PASS 20 SPECIAL PIPES IN ONE RUN', n: 20, run: r => r.special, req: () => (stats.maxBossRun || 0) >= 1 },
+  { id: 'h_race',    tier: 2, t: 'WIN 2 RACES', n: 2, ev: 'race', req: () => RACE_ON },
+  { id: 'w_score',   tier: 3, t: 'SCORE 75 IN ONE RUN', n: 75, run: () => score },
+  { id: 'w_bosses',  tier: 3, t: 'BEAT 4 BOSSES IN ONE RUN', n: 4, run: () => bossesBeaten },
+];
+const MISSION_PAY = [1, 2, 4, 6], TIER_COLS = ['#5aa830', '#e86a17', '#d8283c', '#8a3ad0'], TIER_NAMES = ['EASY', 'MEDIUM', 'HARD', 'WEEKEND'];
+const missionById = id => MISSIONS.find(m => m.id === id);
+const wordPay = d => d.weekend ? 5 : 3, streakPay = n => n >= 7 ? 5 : n >= 3 ? 2 : 1;
+const dayKey = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+function seeded(str) {    // small deterministic random generator from a string (the date)
+  let h = 2166136261; for (const c of str) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return () => { h += 0x6D2B79F5; let t = h; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function ensureDaily() {  // today's challenges (rolled the first time they're needed each day)
+  const day = dayKey();
+  if (stats.daily && stats.daily.day === day) return stats.daily;
+  const rnd = seeded('slappy-' + day), dow = new Date().getDay(), weekend = dow === 0 || dow === 6;
+  const words = weekend ? WEEKEND_WORDS : DAILY_WORDS, word = words[Math.floor(rnd() * words.length)];
+  const pick = tier => { const order = MISSIONS.filter(m => m.tier === tier).map(m => [rnd(), m]).sort((a, b) => a[0] - b[0]).map(v => v[1]); return order.find(m => !m.req || m.req()) || order[0]; };
+  const ms = [pick(0), pick(1), pick(weekend ? 3 : 2)].map(m => ({ id: m.id, p: 0, claimed: false }));
+  stats.daily = { day, word, got: 0, wordClaimed: false, weekend, missions: ms, streakClaimed: true };
+  saveStats();
+  return stats.daily;
+}
+function streakNow() {    // days in a row, counting today only once a run has been played
+  const st = stats.streak; if (!st) return 0;
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  return st.last === dayKey() || st.last === dayKey(y) ? st.n : 0;
+}
+function dailyPlayed() {  // the first finished run of the day extends the streak
+  const d = ensureDaily(), st = stats.streak || (stats.streak = { last: '', n: 0 });
+  if (st.last === d.day) return;
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  st.n = st.last === dayKey(y) ? st.n + 1 : 1; st.last = d.day;
+  stats.bestStreak = Math.max(stats.bestStreak || 0, st.n);
+  d.streakClaimed = false; saveStats();
+}
+let rs = null;            // this run's numbers, for the "in one run" missions
+const newRunStats = () => ({ coins: 0, flawless: 0, combo: 0, special: 0, chomp: 0, startBest: best, letterAt: spawned + 4 + (Math.random() * 4 | 0) });
+function dailyRunStart() { ensureDaily(); rs = newRunStats(); }
+function dq(ev, n = 1) {  // something happened that a day-long mission may count
+  if (raceOn() && ev !== 'race') return;
+  const d = ensureDaily();
+  for (const m of d.missions) {
+    const M = missionById(m.id);
+    if (M && M.ev === ev && m.p < M.n) { m.p = Math.min(M.n, m.p + n); statsDirty = true; if (m.p >= M.n) missionDone(M); }
+  }
+}
+function dqRun() {        // "in one run" missions keep the best value reached today
+  if (!rs || raceOn()) return;
+  const d = ensureDaily();
+  for (const m of d.missions) {
+    const M = missionById(m.id);
+    if (M && M.run && m.p < M.n) { const v = Math.min(M.n, M.run(rs)); if (v > m.p) { m.p = v; statsDirty = true; if (v >= M.n) missionDone(M); } }
+  }
+}
+function missionDone(M) {
+  toasts.push({ kind: 'daily', title: 'MISSION DONE!', sub: 'CLAIM +' + MISSION_PAY[M.tier] + ' IN DAILY', t: 0 });
+  sfx('token'); saveStats();
+}
+function letterGot(c) {
+  const d = ensureDaily(); if (d.got >= d.word.length) return;
+  d.got++; saveStats();
+  popup(c.letter, c.x, c.y - 22, { sc: 4, fill: '#fff', ol: '#3a2a90', life: 50, vy: -0.7 });
+  burst(c.x, c.y, 18, ['#b8a0ff', '#fff', '#7ad0ff'], 4, 22, 4);
+  rings.push({ x: c.x, y: c.y, r: 8, dr: 4, life: 16, col: '#b8a0ff' });
+  sfx('coin', true);
+  if (d.got >= d.word.length) { toasts.push({ kind: 'daily', title: 'WORD COMPLETE!', sub: d.word + '  CLAIM +' + wordPay(d), t: 0 }); sfx('fanfare'); }
+}
+function drawLetter(c, x, y) {   // a glowing letter tile riding in a pipe gap
+  if ((tick >> 3) & 1) pring(x, y, 18, '#b8a0ff');
+  g.fillStyle = '#2a1a60'; g.fillRect(x - 13, y - 13, 26, 26);
+  g.fillStyle = '#7a60e0'; g.fillRect(x - 11, y - 11, 22, 22);
+  g.fillStyle = '#a890ff'; g.fillRect(x - 11, y - 11, 22, 3);
+  text(c.letter, x, y - 7, 2, '#fff', '#2a1a60', 0);
+}
+function drawWordStrip(x0, y0) {  // the day's word in the corner during a run, filling in as letters are found
+  const d = stats.daily; if (!d || d.got >= d.word.length || raceOn()) return;
+  for (let i = 0; i < d.word.length; i++) {
+    const x = x0 + i * 13, have = i < d.got;
+    g.fillStyle = '#2a1a60'; g.fillRect(x, y0, 12, 16);
+    g.fillStyle = have ? '#7a60e0' : '#4a3c80'; g.fillRect(x + 1, y0 + 1, 10, 14);
+    text(d.word[i], x + 6, y0 + 5, 1, have ? '#fff' : '#8a80b8', '#000', 0);
+  }
+}
+
+// ------------------------------------------------------------ daily screen
+const dailyUI = { open: false, rect: null, flash: {} };
+function openDaily() { if (!settingsAllowed()) return; ensureDaily(); dailyUI.open = true; notesPage = -1; lb.open = false; sfx('blip', true); }
+function closeDaily() { dailyUI.open = false; sfx('blip', false); }
+function dailyClaimable() {
+  const d = stats.daily; if (!d || d.day !== dayKey()) return 0;
+  let n = (d.got >= d.word.length && !d.wordClaimed ? 1 : 0) + (d.streakClaimed ? 0 : 1);
+  for (const m of d.missions) { const M = missionById(m.id); if (M && m.p >= M.n && !m.claimed) n++; }
+  return n;
+}
+function claimTokens(n, key) {
+  tokens += n; tokenBump = 8; dailyUI.flash[key] = 24; save(); saveStats(); sfx('token');
+}
+function dailyButtonBadge() {
+  const n = dailyClaimable(), b = buttons.find(b => b.label === 'DAILY'); if (!b || !n) return;
+  const bx = b.x + b.w - 10, by = b.y + 4;
+  pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(n, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
+}
+function gearButton(x, y) {   // SETTINGS as a gear, to make room on narrow screens
+  button(x, y, 44, 30, '', openSettings);
+  buttons[buttons.length - 1].label = 'SETTINGS';
+  const dy = Math.round(pressAmount(x + '|' + y + '|' + 44) * 3), cx = x + 22, cy = y + 13 + dy;
+  g.fillStyle = '#fff';
+  g.fillRect(cx - 2, cy - 9, 4, 18); g.fillRect(cx - 9, cy - 2, 18, 4);
+  for (const [ox, oy] of [[-7, -7], [4, -7], [-7, 4], [4, 4]]) g.fillRect(cx + ox, cy + oy, 3, 3);
+  pcircle(cx, cy, 6, '#fff'); pcircle(cx, cy, 2, '#e86a17');
+}
+function menuRow(y) {         // DAILY, SKINS and the settings gear side by side
+  const w1 = tw('DAILY') + 28, w2 = tw('SKINS') + 28;
+  let x = Math.round((LW - (w1 + w2 + 44 + 20)) / 2);
+  button(x, y, w1, 30, 'DAILY', openDaily); x += w1 + 10;
+  button(x, y, w2, 30, 'SKINS', openSkins); x += w2 + 10;
+  gearButton(x, y);
+  skinsButtonBadge(); dailyButtonBadge();
+}
+function drawDaily() {
+  const d = ensureDaily(), w = wide ? 420 : LW - 16, x = Math.round((LW - w) / 2);
+  const maxc = Math.floor((w - 28 - 78 + 2) / 12);
+  const cards = d.missions.map(m => { const M = missionById(m.id); return { m, M, lines: wrapText(M.t, maxc) }; });
+  const cardH = c => 22 + c.lines.length * 16;
+  const h = 60 + 70 + cards.reduce((a, c) => a + cardH(c) + 6, 0) + 58 + 50;
+  const y = clamp(Math.round((Math.min(LH, 620) - h) / 2), 6, Math.max(6, LH - h - 6));
+  dailyUI.rect = { x, y, w, h };
+  buttons = [];
+  g.fillStyle = 'rgba(16,10,22,0.72)'; cover();
+  drawPanel(x, y, w, h);
+  text('DAILY', LW / 2, y + 8, 3, '#fff', '#543847', 2);
+  const mid = new Date(); mid.setHours(24, 0, 0, 0);
+  const left = Math.max(0, mid - Date.now()), hh = Math.floor(left / 36e5), mm = Math.floor(left / 6e4) % 60;
+  text('NEW IN ' + hh + 'H ' + mm + 'M', x + 12, y + 38, 2, '#8a7438', '#000', 0, 'l');
+  counter(tokenSmall, Math.min(tokens, 999), tokenBump, x + w - 12, y + 36, 'r', true);
+  for (const k in dailyUI.flash) if (--dailyUI.flash[k] <= 0) delete dailyUI.flash[k];
+  const card = (cy, ch, col, key) => {
+    const fl = dailyUI.flash[key];
+    g.fillStyle = '#543847'; g.fillRect(x + 8, cy, w - 16, ch);
+    g.fillStyle = fl && (fl >> 2) & 1 ? '#fff' : '#fff8d8'; g.fillRect(x + 10, cy + 2, w - 20, ch - 4);
+    g.fillStyle = col; g.fillRect(x + 10, cy + 2, 4, ch - 4);
+  };
+  const reward = (cy, n, done, claimed, act) => {   // right column: +N, CLAIM or DONE
+    const rx = x + w - 18;
+    if (claimed) text('DONE', rx, cy, 2, '#1f7a30', '#000', 0, 'r');
+    else if (done) button(rx - 72, cy - 6, 72, 26, 'CLAIM', act);
+    else { g.drawImage(tokenSmall, rx - 14, cy, 14, 14); text('+' + n, rx - 18, cy, 2, '#8a3ad0', '#000', 0, 'r'); }
+  };
+  // the daily word
+  let cy = y + 60;
+  const wd = d.got >= d.word.length;
+  card(cy, 64, '#7a60e0', 'word');
+  text(d.weekend ? 'WEEKEND WORD' : 'DAILY WORD', x + 20, cy + 8, 2, '#3a2a90', '#000', 0, 'l');
+  reward(cy + 8, wordPay(d), wd, d.wordClaimed, () => { if (!d.wordClaimed && wd) { d.wordClaimed = true; claimTokens(wordPay(d), 'word'); } });
+  const tl = d.word.length, tx0 = Math.round(LW / 2 - (tl * 28 - 4) / 2);
+  for (let i = 0; i < tl; i++) {
+    const tx = tx0 + i * 28, have = i < d.got;
+    g.fillStyle = '#2a1a60'; g.fillRect(tx, cy + 30, 24, 26);
+    g.fillStyle = have ? '#7a60e0' : '#d8d0f0'; g.fillRect(tx + 2, cy + 32, 20, 22);
+    if (have) { g.fillStyle = '#a890ff'; g.fillRect(tx + 2, cy + 32, 20, 3); }
+    text(d.word[i], tx + 12, cy + 36, 2, have ? '#fff' : '#a8a0c8', '#000', 0);
+  }
+  cy += 70;
+  // the three missions
+  cards.forEach(({ m, M, lines }, i) => {
+    const ch = cardH({ lines }), done = m.p >= M.n;
+    card(cy, ch, TIER_COLS[M.tier], 'm' + i);
+    lines.forEach((l, k) => text(l, x + 20, cy + 7 + k * 16, 2, done ? '#1f7a30' : '#543847', '#000', 0, 'l'));
+    const by = cy + 9 + lines.length * 16, bw = w - 28 - 78 - 34;
+    g.fillStyle = '#543847'; g.fillRect(x + 20, by, bw, 6);
+    g.fillStyle = '#e8dcb0'; g.fillRect(x + 21, by + 1, bw - 2, 4);
+    g.fillStyle = done ? '#7fe05a' : TIER_COLS[M.tier]; g.fillRect(x + 21, by + 1, Math.round((bw - 2) * Math.min(1, m.p / M.n)), 4);
+    if (M.n > 1) text(Math.min(m.p, M.n) + '/' + M.n, x + 20 + bw + 4, by - 3, 1, '#8a7438', '#000', 0, 'l');
+    text(TIER_NAMES[M.tier], x + w - 18, cy + ch - 12, 1, TIER_COLS[M.tier], '#000', 0, 'r');
+    reward(cy + 7, MISSION_PAY[M.tier], done, m.claimed, () => { if (!m.claimed && m.p >= M.n) { m.claimed = true; claimTokens(MISSION_PAY[M.tier], 'm' + i); } });
+    cy += ch + 6;
+  });
+  // the streak
+  const sn = streakNow(), today = stats.streak && stats.streak.last === d.day;
+  card(cy, 52, '#f8a030', 'streak');
+  text(sn ? sn + ' DAY STREAK' : 'NO STREAK YET', x + 20, cy + 8, 2, '#c2310c', '#000', 0, 'l');
+  text(today ? 'COME BACK TOMORROW FOR MORE' : 'PLAY A RUN TODAY TO KEEP IT', x + 20, cy + 26, 1, '#8a7438', '#000', 0, 'l');
+  text((stats.bestStreak || 0) >= 7 ? 'SUNRISE SKIN UNLOCKED' : '7 DAYS: SUNRISE SKIN', x + 20, cy + 38, 1, (stats.bestStreak || 0) >= 7 ? '#1f7a30' : '#e86a17', '#000', 0, 'l');
+  if (today) reward(cy + 8, streakPay(sn), true, d.streakClaimed, () => { if (!d.streakClaimed) { d.streakClaimed = true; claimTokens(streakPay(sn), 'streak'); } });
+  else { g.drawImage(tokenSmall, x + w - 32, cy + 8, 14, 14); text('+' + streakPay(sn + 1), x + w - 36, cy + 8, 2, '#8a3ad0', '#000', 0, 'r'); }
+  button(Math.round(LW / 2 - 60), y + h - 42, 120, 30, 'DONE', closeDaily);
+}
+
+function drawToasts() {           // "NEW SKIN!" / "MISSION DONE!" cards sliding in at the top
   toasts.slice(0, 1).forEach(tt => {
-    const k = skinById(tt.id), e = Math.min(1, tt.t / 12, (170 - tt.t) / 14), w = Math.max(tw(k.name) + 70, 190), x = Math.round((LW - w) / 2);
+    const k = tt.kind ? null : skinById(tt.id), e = Math.min(1, tt.t / 12, (170 - tt.t) / 14);
+    const w = Math.max(tw(k ? k.name : tt.sub) + 70, 190), x = Math.round((LW - w) / 2);
     const live = state === 'play' || state === 'dying' || state === 'revive';   // in a run: below the score; otherwise above the menus
     const y0 = live ? (wide ? 90 : 82) + (raceOn() && race.opp ? (wide ? 30 : 36) : 0) : (wide ? 18 : 12), y = Math.round(-60 + e * (y0 + 60));
     drawPanel(x, y, w, 44);
+    if (!k) {
+      g.drawImage(tokenSmall, x + 12, y + 8, 28, 28);
+      text(tt.title, x + 52, y + 6, 2, '#8a3ad0', '#000', 0, 'l');
+      text(tt.sub, x + 52, y + 24, 2, '#543847', '#000', 0, 'l');
+      return;
+    }
     g.drawImage(skinFrame(k.id, [0, 1, 2, 1][(tick / 6 | 0) % 4]), x + 8, y + 9, 36, 26);
     text('NEW SKIN!', x + 52, y + 6, 2, '#e86a17', '#000', 0, 'l');
     text(k.name, x + 52, y + 24, 2, '#543847', '#000', 0, 'l');
@@ -2723,6 +2974,7 @@ function drawCompactHUD() {
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
   if (state !== 'slot') { counter(coinSmall, bank, coinBump, LW - 12, 16, 'r'); counter(tokenSmall, tokens, tokenBump, LW - 12, 38, 'r'); }
   if (TOUCH && state === 'play') pauseButton(14, 16);
+  if (state === 'play' || state === 'revive') drawWordStrip(14, 52);
   if (state === 'ready') {
     betaBadge(12, 12);
     if (A2HS_ON) { a2hsButton(null, Math.min(LH - 32, 480)); if (!a2hsSeen && notesPage < 0 && !a2hs.open && tick > 40) openA2HS(); }
@@ -2732,10 +2984,10 @@ function drawCompactHUD() {
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
     if (LB_ON) buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['RACE', openRace]] : [['LEADERBOARD', openLB]]); else notesButton(340);
     if (TOUCH) {
-      buttonRow(420, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
+      menuRow(420);
       text('BEST ' + best, LW / 2, A2HS_ON ? 460 : 466, 2, '#e86a17', '#ded895', 0);
     } else {
-      buttonRow(376, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
+      menuRow(376);
       drawMeter(414);
       text('BEST ' + best, LW / 2, 450, 2, '#e86a17', '#ded895', 0);
       text('S:SETTINGS  F:FULL', LW / 2, 468, 2, '#8a7438', '#ded895', 0);
@@ -2747,7 +2999,7 @@ function drawCompactHUD() {
     if (overT > 50) {
       if ((tick / 24 | 0) % 2 === 0) text(ACT + ' TO RETRY', LW / 2, 320, 3, '#fff', '#543847', 2);
       if (!canSpin()) text('50 COINS BUY A SPIN', LW / 2, 364, 2, '#ffe14d', '#543847');
-      if (TOUCH) { if (LB_ON) lbButton(null, 420); buttonRow(LB_ON ? 458 : 420, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge(); } else drawMeter(414);
+      if (TOUCH) { if (LB_ON) lbButton(null, 420); menuRow(LB_ON ? 458 : 420); } else drawMeter(414);
     }
   }
 }
@@ -2756,6 +3008,7 @@ function drawWideHUD() {
   if (raceOn()) return drawRaceHUD();
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 26, 6, '#fff', '#000', 3);
   wideTopBar();
+  if (state === 'play' || state === 'revive') drawWordStrip(28, 136);
   if (state !== 'slot') {
     chip(28, 60, tw(String(bank)) + 46, 30); counter(coinSmall, bank, coinBump, 40, 68, 'l', true);
     chip(28, 96, tw(String(tokens)) + 46, 30); counter(tokenSmall, tokens, tokenBump, 40, 104, 'l', true);
@@ -2766,9 +3019,9 @@ function drawWideHUD() {
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
-    { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ...(RACE_ON ? [['RACE', openRace]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
+    { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ['DAILY', openDaily], ...(RACE_ON ? [['RACE', openRace]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
       while (it.reduce((a, [l]) => a + tw(l) + 28 + 16, -16) > LW - 40) it.pop();
-      buttonRow(344, it, 16); skinsButtonBadge(); }
+      buttonRow(344, it, 16); skinsButtonBadge(); dailyButtonBadge(); }
     wideControls();
   }
   if (state === 'over') {
@@ -2809,6 +3062,7 @@ function drawBoom(b) {
 
 function drawCoin(c) {
   const x = Math.round(c.x / 2) * 2, y = Math.round((c.y + Math.sin(tick * 0.08 + c.ph) * 2) / 2) * 2;
+  if (c.letter) return drawLetter(c, x, y);
   const f = ((tick / 7 + c.ph * 4) | 0) % 4;
   if (c.big) {
     if ((tick >> 3) & 1) pring(x, y, 16, '#fff4a0');            // "this one's worth it"
@@ -3182,6 +3436,7 @@ function draw() {
   if (lb.open) drawLB();
   if (race.panel) drawRacePanel();
   if (skinsUI.open) drawSkins();
+  if (dailyUI.open) drawDaily();
   if (a2hs.open) drawA2HS();
   if (nameBoxOpen) drawNameBox();
   if (paused && resumeT) {
@@ -3326,6 +3581,7 @@ function gatherLights() {
   }
   for (const c of coins) {
     if (c.token) addLight(c.x, c.y, 58, 0.55 * pulse, [0.8, 0.4, 1]);
+    else if (c.letter) addLight(c.x, c.y, 54, 0.5 * pulse, [0.6, 0.5, 1]);
     else if (c.big && (!c.pipe || c.pipe.intro >= INTRO)) addLight(c.x, c.y, 40, 0.3 * pulse, [1, 0.85, 0.35]);
   }
   for (const r of rings) addLight(r.x, r.y, r.r + 30, 0.25, [1, 0.95, 0.75]);
@@ -3461,8 +3717,9 @@ addEventListener('keydown', e => {
   else if (k === 'KeyL' && LB_ON) { if (lb.open) closeLB(); else openLB(); }
   else if (k === 'KeyR' && RACE_ON && !raceOn() && !race.panel) openRace();
   else if (k === 'KeyK') { if (skinsUI.open) closeSkins(); else openSkins(); }
+  else if (k === 'KeyD') { if (dailyUI.open) closeDaily(); else openDaily(); }
   else if (k === 'KeyF' && !e.metaKey) { native('fullscreen'); }
-  else if (k === 'Escape') { if (notesPage >= 0) closeNotes(); else if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
+  else if (k === 'Escape') { if (notesPage >= 0) closeNotes(); else if (race.panel === 'lobby') raceLeave(); else if (a2hs.open) closeA2HS(); else if (skinsUI.open) closeSkins(); else if (dailyUI.open) closeDaily(); else if (settingsOpen) closeSettings(); else if (lb.open) closeLB(); else if (fullscreen) native('exitFullscreen'); else setPaused(true); }
   else if (k === 'KeyP') { setPaused(!paused || resumeT > 0); }
   else if (k === 'KeyX' && state === 'slot' && slot.phase !== 'spin' && slot.phase !== 'jackpot') giveUp();
   else if (k === 'KeyN' && state === 'ready' && !settingsOpen && !lb.open) { if (notesPage >= 0) closeNotes(); else openNotes(); }
@@ -3480,7 +3737,7 @@ screen.addEventListener('pointerdown', e => {
     if (lx >= L.x && lx < L.x + L.w && ly >= L.y && ly < L.y + L.h) lbDrag = { id: e.pointerId, y: e.clientY, s0: lb.scroll[lb.tab] || 0, k: (LH + TOP + OVER) / r.height, last: e.clientY, t: performance.now() };
   }
   const atEdge = visH - e.clientY < EDGE_PX;
-  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || notesPage >= 0)) {
+  if (TOUCH && e.pointerType !== 'mouse' && (atEdge || state !== 'play' || paused || race.panel || settingsOpen || lb.open || a2hs.open || nameBoxOpen || skinsUI.open || dailyUI.open || notesPage >= 0)) {
     heldTap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
@@ -3520,6 +3777,7 @@ function handleTap(cx, cy) {
   if (a2hs.open) { const q = a2hs.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeA2HS(); return; }
   if (notesPage >= 0 && state === 'ready') { const q = notesRect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeNotes(); return; }
   if (skinsUI.open) { const q = skinsUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeSkins(); return; }
+  if (dailyUI.open) { const q = dailyUI.rect; if (!q || x < q.x || x >= q.x + q.w || y < q.y || y >= q.y + q.h) closeDaily(); return; }
   flap('click');
 }
 if (TOUCH) {
@@ -3592,6 +3850,7 @@ if (LB_ON) {
 }
 checkSkins(true);   // retroactive unlocks (e.g. from your best score), quietly; a NEW badge shows on SKINS
 reset(); fade = 0;
+ensureDaily();
 loadRun();          // a run that was interrupted by the app being closed
 requestAnimationFrame(loop);
 </script>
