@@ -867,7 +867,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 15;
-const BUILD = '1012-18';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-19';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 15, title: 'HOMEBODY', items: [
     { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
@@ -2676,6 +2676,19 @@ function drawScoreboard(cx, py, w) {
   if (newBest && overT > 48) { const nx = x0 + w - 125; g.fillStyle = '#f84828'; g.fillRect(nx, py + 62, 32, 18); text('NEW', nx + 16, py + 64, 2, '#fff', '#000', 0); }
 }
 
+// The web version is the open beta of the App Store game: a badge under the logo says so.
+function betaBadge(cx, cy) {
+  const w = tw('OPEN BETA') + 24, h = 26, x = Math.round(cx - w / 2), y = Math.round(cy - h / 2) + ((tick >> 4) & 1) * 2;   // a little bob
+  g.fillStyle = 'rgba(28,16,40,0.3)'; g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle = '#543847'; g.fillRect(x, y, w, h);
+  g.fillStyle = '#fff'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
+  g.fillStyle = '#e8302a'; g.fillRect(x + 4, y + 4, w - 8, h - 8);
+  g.fillStyle = '#ff6a5a'; g.fillRect(x + 4, y + 4, w - 8, 2);
+  g.fillStyle = '#b01c22'; g.fillRect(x + 4, y + h - 6, w - 8, 2);
+  text('OPEN BETA', x + w / 2 + 1, y + 7, 2, '#7a0c20', '#000', 0);   // drop shadow
+  text('OPEN BETA', x + w / 2, y + 6, 2, '#fff', '#000', 0);
+}
+
 function drawCompactHUD() {
   if (raceOn()) return drawRaceHUD();
   if (state === 'play' || state === 'dying' || state === 'revive') text(score, LW / 2, 36, 4, '#fff', '#000', 2);
@@ -2685,12 +2698,14 @@ function drawCompactHUD() {
     if (A2HS_ON) { a2hsButton(12, 14); if (!a2hsSeen && notesPage < 0 && !a2hs.open && tick > 40) openA2HS(); }
     bigText('SLAPPY', LW / 2, 80, 6, '#ffd23f', '#f0a020');
     bigText('BIRD', LW / 2, 134, 6, '#ffd23f', '#f0a020');
+    betaBadge(LW / 2, 200);
     if (TOUCH) tapHint(LW / 2 + 36, 226);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 2, '#fff', '#543847');
     if (LB_ON) buttonRow(340, RACE_ON ? [['LEADERBOARD', openLB], ['RACE', openRace]] : [['LEADERBOARD', openLB]]); else notesButton(340);
     if (TOUCH) {
       buttonRow(420, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
       text('BEST ' + best, LW / 2, 466, 2, '#e86a17', '#ded895', 0);
+      text('SOON ON THE APP STORE!', LW / 2, 488, 2, '#a89060', '#ded895', 0);
     } else {
       buttonRow(376, [['SKINS', openSkins], ['SETTINGS', openSettings]]); skinsButtonBadge();
       drawMeter(414);
@@ -2720,6 +2735,8 @@ function drawWideHUD() {
   if (state === 'ready') {
     if (A2HS_ON) { a2hsButton(null, 24); if (!a2hsSeen && notesPage < 0 && !a2hs.open && tick > 40) openA2HS(); }
     bigText('SLAPPY BIRD', LW / 2, 100, 7, '#ffd23f', '#f0a020');
+    betaBadge(LW / 2, 186);
+    text('SOON ON THE APP STORE!', LW / 2, 214, 2, '#fff', '#543847');
     if (TOUCH) tapHint(BIRD_X + 110, 220);
     else if ((tick / 24 | 0) % 2 === 0) text('SLAP YOUR MAC TO FLAP', LW / 2, 300, 3, '#fff', '#543847', 2);
     { const it = [...(LB_ON ? [['LEADERBOARD', openLB]] : []), ...(RACE_ON ? [['RACE', openRace]] : []), ['SKINS', openSkins], ['PATCH NOTES', openNotes]];
