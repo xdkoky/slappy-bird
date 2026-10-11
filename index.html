@@ -684,9 +684,13 @@ const SKINS = [
     pat: (x, y, ch) => ch === 'o' ? (y % 2 ? '#f8c81c' : '#b07810') : null, extra: slotBirdExtra,
     how: 'GET REVIVED BY THE SLOTS', need: () => [stats.revives, 1] },
   { id: 'racer',    name: 'RACER',         tier: 'base', pal: { r: '#f83850', R: '#b01830' }, pat: (x, y, ch) => ch === 'o' ? '#f83850' : (((x >> 1) + (y >> 1)) & 1 ? '#1a1a1a' : '#f4f4f4'), how: 'WIN A 1V1 RACE', need: () => [stats.racesWon, 1], race: true },
+  // for playing the installed app: a deep sky gradient with clouds drifting across it (darker than the game's sky so it stands out)
+  { id: 'homebody', name: 'HOMEBODY',      tier: 'base', bonus: true, anim: true, pal: { k: '#0c2448', o: '#ffffff', v: '#e8f4ff', r: '#ffb030', R: '#d87a10' },
+    pat: (x, y, ch, t) => ch === 'o' ? null : Math.sin((x - t * 0.06) * 0.8) + Math.sin(y * 1.3 + x * 0.35 - t * 0.03) > 1.2 ? '#ffffff' : y < 4 ? '#1a4cb0' : y < 8 ? '#2a6ad8' : '#5090f0',
+    how: 'PLAY FROM YOUR HOME SCREEN', need: () => [stats.homescreen ? 1 : 0, 1] },
   // mastery: in order, each with several requirements
   { id: 'gold',     name: 'GOLD',          tier: 'gold', pal: { k: '#6a4808', y: '#f8c81c', Y: '#fff4a0', o: '#d8a010', v: '#fff0b0', r: '#fff4a0', R: '#d8a010' }, sheen: '#fffbe0',
-    reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'rookie' && (!k.race || RACE_ON));
+    reqs: () => { const base = SKINS.filter(k => k.tier === 'base' && k.id !== 'rookie' && !k.bonus && (!k.race || RACE_ON));
       return [['ALL ' + base.length + ' SKINS ABOVE', base.filter(k => hasSkin(k.id)).length, base.length], ['BEAT EVERY BOSS', (stats.bossTypes || []).length, 1 + BOSSES.length]]; } },
   { id: 'platinum', name: 'PLATINUM',      tier: 'plat', pal: { k: '#4a5068', y: '#d4dae8', Y: '#ffffff', o: '#a8b0c8', v: '#ffffff', r: '#c0c8d8', R: '#8890a8' }, sheen: '#ffffff', after: 'gold',
     reqs: () => [['SCORE 75 IN A RUN', best, 75], ['PARRY 50 FIREBALLS', stats.parries, 50]] },
@@ -737,12 +741,13 @@ function checkEgg() {
   if (stats.egg) return;
   const d = new Date();
   if (d.getHours() === 20 && d.getMinutes() === 14) { stats.egg = true; statsDirty = true; }
+  if ((STANDALONE || NATIVE) && !stats.homescreen) { stats.homescreen = true; statsDirty = true; }   // opened as the installed app
 }
 function checkSkins(silent) {
   checkEgg();
   for (const k of SKINS) if (!hasSkin(k.id) && (!k.race || RACE_ON) && skinReady(k)) {
     stats.skins.push(k.id); stats.newSkins = [...(stats.newSkins || []), k.id]; statsDirty = true;   // NEW tag until viewed
-    if (!silent || k.id === 'classic') { toasts.push({ id: k.id, t: 0 }); sfx('token'); }   // the secret always gets its moment
+    if (!silent || k.id === 'classic' || k.id === 'homebody') { toasts.push({ id: k.id, t: 0 }); sfx('token'); }   // the secret always gets its moment
   }
   if (statsDirty) { statsDirty = false; saveStats(); }
 }
@@ -750,7 +755,7 @@ function saveStats() { try { localStorage.setItem('slappy-stats', JSON.stringify
 // Built frames per skin; animated skins rebuild every few ticks (each frame is only 18x13 pixels).
 const skinCache = new Map();
 function skinFrame(id, f, t = tick) {
-  const k = skinById(id), animated = !!(k.sheen || k.glow || k.extra || k.tier === 'dev');
+  const k = skinById(id), animated = !!(k.sheen || k.glow || k.extra || k.anim || k.tier === 'dev');
   const bucket = animated ? (t >> 1) : 0, key = id + f + '|' + bucket;
   let c = skinCache.get(key); if (c) return c;
   if (skinCache.size > 400) skinCache.clear();
@@ -857,8 +862,12 @@ function pcircle(cx, cy, r, col) {
 // ============================================================ patch notes
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
-const NOTES_VERSION = 14;
+const NOTES_VERSION = 15;
 const PATCH_NOTES = [
+  { v: 15, title: 'HOMEBODY', items: [
+    { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
+    { h: 'DRUMROLL PLEASE', col: '#f83850', t: 'TWO HEARTS ON THE SLOTS NOW GET A DRUMROLL. AND BANNERS ARE SMALLER SO YOU CAN SEE THE PIPES.' },
+  ] },
   { v: 14, title: 'NEW BIRD', items: [
     { h: 'MEET ROOKIE', col: '#6a5c4a', t: 'EVERYONE NOW STARTS AS A PLAIN GREY BIRD. DO CHALLENGES TO EARN BETTER SKINS!' },
     { h: 'WHERE IS YELLOW?', col: '#c8860c', t: 'THE YELLOW BIRD IS NOW A SECRET SKIN. CHECK SKINS FOR A HINT...' },
@@ -2321,11 +2330,11 @@ addEventListener('beforeinstallprompt', e => { e.preventDefault(); a2hs.prompt =
 const A2HS_PAGES = IOS ? [
   { icon: 'share', t: 'TAP THE SHARE BUTTON IN SAFARI.', s: 'NEWER IPHONES: TAP ... FIRST.', arrow: true },
   { icon: 'add',   t: 'SCROLL DOWN AND TAP ADD TO HOME SCREEN.', s: 'IT IS IN THE LIST UNDER THE APPS.' },
-  { icon: 'app',   t: 'TAP ADD. THEN OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE.' },
+  { icon: 'app',   t: 'TAP ADD. THEN OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE + A FREE SKIN!' },
 ] : [
   { icon: 'menu',  t: 'TAP THE MENU BUTTON IN YOUR BROWSER.', s: 'THE THREE DOTS AT THE TOP RIGHT.' },
   { icon: 'add',   t: 'TAP ADD TO HOME SCREEN OR INSTALL APP.', s: '' },
-  { icon: 'app',   t: 'NOW OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE.' },
+  { icon: 'app',   t: 'NOW OPEN THE GAME FROM YOUR HOME SCREEN!', s: 'FULL SCREEN AND OFFLINE + A FREE SKIN!' },
 ];
 function openA2HS() { if (!A2HS_ON || !settingsAllowed()) return; a2hs.open = true; a2hs.page = 0; notesPage = -1; sfx('blip', true); }
 function closeA2HS() { a2hs.open = false; a2hsSeen = true; try { localStorage.setItem('slappy-a2hs', '1'); } catch {} sfx('blip', false); }
