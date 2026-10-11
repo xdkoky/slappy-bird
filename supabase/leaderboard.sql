@@ -20,6 +20,7 @@ create table if not exists public.players (
   created_at  timestamptz not null default now()
 );
 alter table public.players add column if not exists dev boolean not null default false;
+alter table public.players add column if not exists skin text;     -- the bird they fly, shown on the board
 create index if not exists players_best_idx on public.players (best desc, best_at);
 create index if not exists players_week_idx on public.players (week, week_best desc, week_at);
 
@@ -43,13 +44,14 @@ create unique index if not exists players_name_key on public.players (name);
 
 -- Old versions of the functions (their return types change below).
 drop function if exists public.submit_score(uuid, text, text, int);
+drop function if exists public.submit_score(uuid, text, text, int, text);
 drop function if exists public.leaderboard(text, uuid);
 drop function if exists public.leaderboard(text, uuid, int);
 
 -- Record a finished run (also used with score 0 to set or change the player's name).
 -- Returns the name actually stored: if the requested name is taken (or reserved for the developer)
 -- an existing player keeps their old name, and a new player gets the name with a number added.
-create function public.submit_score(p_id uuid, p_secret text, p_name text, p_score int)
+create function public.submit_score(p_id uuid, p_secret text, p_name text, p_score int, p_skin text default null)
 returns text
 language plpgsql security definer
 set search_path = public, extensions
@@ -58,6 +60,7 @@ declare
   r    public.players;
   wk   date := date_trunc('week', now() at time zone 'utc')::date;
   nm   text := left(btrim(regexp_replace(regexp_replace(upper(coalesce(p_name, '')), '[^A-Z0-9 ]', '', 'g'), ' +', ' ', 'g')), 12);
+  sk   text := nullif(left(regexp_replace(lower(coalesce(p_skin, '')), '[^a-z0-9]', '', 'g'), 16), '');
   base text;
   i    int := 0;
   ok   boolean;
@@ -81,16 +84,19 @@ begin
         i := i + 1; nm := left(base, 12 - length(i::text) - 1) || ' ' || i;
       end loop;
     end if;
-    insert into public.players (id, secret_hash, name, best, best_at, week, week_best, week_at)
-    values (p_id, crypt(p_secret, gen_salt('bf')), nm, p_score, now(), wk, p_score, now());
+    if sk = 'dev' then sk := null; end if;             -- the DEV skin is the developer's alone
+    insert into public.players (id, secret_hash, name, best, best_at, week, week_best, week_at, skin)
+    values (p_id, crypt(p_secret, gen_salt('bf')), nm, p_score, now(), wk, p_score, now(), sk);
     return nm;
   end if;
 
   if not ok then nm := r.name; end if;               -- taken: keep the current name, still record the score
+  if sk = 'dev' and not r.dev then sk := null; end if;
   if p_score > 0 and now() - r.last_at < interval '2 seconds' then raise exception 'too fast'; end if;
 
   update public.players set
     name      = nm,
+    skin      = coalesce(sk, r.skin),
     last_at   = case when p_score > 0 then now() else r.last_at end,
     best      = greatest(r.best, p_score),
     best_at   = case when p_score > r.best then now() else r.best_at end,
@@ -104,24 +110,24 @@ end $$;
 -- The top p_limit (10 by default, at most 100) for 'week' (resets Mondays 00:00 UTC) or 'all',
 -- plus the asking player's own row.
 create function public.leaderboard(p_kind text, p_id uuid default null, p_limit int default 10)
-returns table (rank bigint, name text, score int, me boolean, dev boolean)
+returns table (rank bigint, name text, score int, me boolean, dev boolean, skin text)
 language sql stable security definer
 set search_path = public
 as $$
   with b as (
-    select id, name, dev,
+    select id, name, dev, skin,
            case when p_kind = 'week' then week_best else best end as score,
            case when p_kind = 'week' then week_at   else best_at end as at
     from public.players
     where p_kind <> 'week' or week = date_trunc('week', now() at time zone 'utc')::date
   ), r as (
-    select id, name, dev, score, rank() over (order by score desc) as rk, row_number() over (order by score desc, at) as rn
+    select id, name, dev, skin, score, rank() over (order by score desc) as rk, row_number() over (order by score desc, at) as rn
     from b where score > 0
   )
-  select rk, name, score, coalesce(id = p_id, false), dev from r where rn <= least(greatest(coalesce(p_limit, 10), 1), 100) or id = p_id order by rn;
+  select rk, name, score, coalesce(id = p_id, false), dev, skin from r where rn <= least(greatest(coalesce(p_limit, 10), 1), 100) or id = p_id order by rn;
 $$;
 
-revoke all on function public.submit_score(uuid, text, text, int) from public;
+revoke all on function public.submit_score(uuid, text, text, int, text) from public;
 revoke all on function public.leaderboard(text, uuid, int) from public;
-grant execute on function public.submit_score(uuid, text, text, int) to anon, authenticated;
+grant execute on function public.submit_score(uuid, text, text, int, text) to anon, authenticated;
 grant execute on function public.leaderboard(text, uuid, int) to anon, authenticated;

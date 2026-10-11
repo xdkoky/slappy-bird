@@ -121,13 +121,14 @@ const player = {
   bestSynced: !!(SAVED.pbsync || idStore.pbsync),        // has the best from before the leaderboard been uploaded?
   picked: !!(SAVED.ppick || idStore.ppick),              // has the player chosen a nickname (or skipped the prompt)?
   isDev: !!(SAVED.pdev || idStore.pdev),                 // the leaderboard says this row is the developer's
+  skinSent: SAVED.pskin || idStore.pskin || '',          // the skin the leaderboard shows for us
 };
 if (!isRandomName(player.name)) player.picked = true;   // already has a real name
 
 function save() {
   const d = { best, sens: sensLevel, crt: crtOn, muted, notes: notesSeen, coins: bank, tokens,
-    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced, ppick: player.picked, pdev: player.isDev, stats };
-  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync, ppick: d.ppick, pdev: d.pdev })); } catch {}
+    pid: player.id, psec: player.secret, pname: player.name, pend: player.pending, pnamed: player.named, pbsync: player.bestSynced, ppick: player.picked, pdev: player.isDev, pskin: player.skinSent, stats };
+  try { localStorage.setItem('slappy-id', JSON.stringify({ pid: d.pid, psec: d.psec, pname: d.pname, pend: d.pend, pnamed: d.pnamed, pbsync: d.pbsync, ppick: d.ppick, pdev: d.pdev, pskin: d.pskin })); } catch {}
   try { window.webkit.messageHandlers.native.postMessage(Object.assign({ type: 'save' }, d)); }
   catch { try { localStorage.setItem('slappy', JSON.stringify(d)); } catch {} }
 }
@@ -975,7 +976,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 17;
-const BUILD = '1012-23';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-24';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 17, title: 'TRAILS', items: [
     { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
@@ -2357,13 +2358,18 @@ function lbCall(fn, body) {
 }
 let lbSending = false, lbRetry = 4000;
 // Upload the best unsent score (and/or a name change). Retries next time if offline.
+let lbNoSkin = false;   // the database doesn't take skins yet (older SQL): send without
 function lbFlush() {
-  if (!LB_ON || lbSending || (!player.pending && player.named)) return;
+  const skin = equipped().id;
+  if (!LB_ON || lbSending || (!player.pending && player.named && (lbNoSkin || player.skinSent === skin))) return;
   lbSending = true;
-  const sc = player.pending;
-  lbCall('submit_score', { p_id: player.id, p_secret: player.secret, p_name: player.name, p_score: sc })
+  const sc = player.pending, body = { p_id: player.id, p_secret: player.secret, p_name: player.name, p_score: sc };
+  if (!lbNoSkin) body.p_skin = skin;
+  lbCall('submit_score', body)
+    .catch(e => { if (!lbNoSkin && e && e.status === 404) { lbNoSkin = true; delete body.p_skin; return lbCall('submit_score', body); } throw e; })
     .then(stored => {
       if (player.pending === sc) player.pending = 0;
+      if (!lbNoSkin) player.skinSent = skin;
       if (typeof stored === 'string' && stored) player.name = stored;   // the server may add a number / refuse a taken name
       player.named = true; save(); lbRetry = 4000; lbLoad();   // keep showing the old board until the new one arrives
     })
@@ -2549,7 +2555,7 @@ function drawSkins() {
     ly += 4;
   }
   const eqd = equipped().id === k.id;
-  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; seenSkin(k.id); saveStats(); sfx('coin'); } }, have && !eqd);
+  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; seenSkin(k.id); saveStats(); sfx('coin'); lbFlush(); } }, have && !eqd);
   button(x + w - 14 - 100, y + h - 42, 100, 30, 'DONE', closeSkins);
 }
 let birdShadowC = null;
@@ -2945,8 +2951,10 @@ function drawLB() {
       const medal = ['#e0a818', '#a8a8b8', '#c07030'][r.rank - 1];
       if (medal) { pcircle(x + 22, ly + 7, 8, '#543847'); pcircle(x + 22, ly + 7, 6, medal); }
       text(r.rank, r.rank > 99 ? x + 21 : x + 22, ly, 2, medal ? '#fff' : '#8a7438', '#000', 0);
-      if (r.dev) devName(nm, x + 40, ly, x + w - 20 - tw(String(r.score)));
-      else text(nm, x + 40, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
+      const sk = SKINS.some(k => k.id === r.skin) ? r.skin : 'rookie';   // the bird they fly: flex the rare ones
+      g.drawImage(skinFrame(sk, [0, 1, 2, 1][((tick >> 3) + i) % 4]), x + 39, ly - 2, 24, 18);
+      if (r.dev) devName(nm, x + 66, ly, x + w - 20 - tw(String(r.score)));
+      else text(nm, x + 66, ly, 2, r.me ? '#c2310c' : '#543847', '#000', 0, 'l');
       text(r.score, x + w - 16, ly, 2, r.dev ? '#ffd23f' : r.me ? '#c2310c' : '#543847', '#000', 0, 'r');
     });
     g.restore();
