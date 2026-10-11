@@ -42,6 +42,20 @@ update public.players p set name = left(d.name, 12 - length(d.rn::text) - 1) || 
 from d where p.id = d.id and d.rn > 1;
 create unique index if not exists players_name_key on public.players (name);
 
+-- Names that are slurs (digits for letters and doubled letters seen through; short words only on their own).
+create or replace function public.bad_name(n text) returns boolean
+language sql immutable
+as $f$
+  with t as (select translate(upper(coalesce(n, '')), '0134578@$9', 'OIEASTBASG') as s),
+       f as (select s, regexp_replace(s, '[^A-Z]', '', 'g') as flat from t)
+  select flat ~ '(NIGG|NIGA|NIGER|NIGR|NIBBA|FAGGOT|FAGOT|RETARD|TRANNY|CHINK|KYKE|BEANER|WETBACK|HITLER|NAZI)'
+      or regexp_replace(flat, '(.)\1+', '\1', 'g') ~ '(NIGA|NIGER|NIGR|FAGOT)'
+      or s ~ '(^|[^A-Z])(FAGS?|KIKES?|SPICS?|COONS?|GOOKS?|DYKES?|PAKIS?|CUNTS?)([^A-Z]|$)'
+  from f;
+$f$;
+-- ...and anyone already using one gets a neutral name (scores are kept).
+update public.players set name = 'BIRD ' || upper(left(md5(id::text), 6)) where public.bad_name(name);
+
 -- Old versions of the functions (their return types change below).
 drop function if exists public.submit_score(uuid, text, text, int);
 drop function if exists public.submit_score(uuid, text, text, int, text);
@@ -71,6 +85,9 @@ begin
 
   select * into r from public.players where id = p_id for update;
   if found and r.secret_hash <> crypt(p_secret, r.secret_hash) then raise exception 'not your player'; end if;
+  if public.bad_name(nm) then                        -- no slurs: keep the old name, or get a neutral one
+    nm := case when r.id is not null and not public.bad_name(r.name) then r.name else 'BIRD ' || upper(left(md5(p_id::text), 6)) end;
+  end if;
 
   -- is the requested name free for this player? (the developer's name and look-alikes are reserved)
   ok := not exists (select 1 from public.players where name = nm and id <> p_id)
