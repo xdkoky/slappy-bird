@@ -696,7 +696,7 @@ function checkEgg() {
 function checkSkins(silent) {
   checkEgg();
   for (const k of SKINS) if (!hasSkin(k.id) && (!k.race || RACE_ON) && skinReady(k)) {
-    stats.skins.push(k.id); stats.fresh = (stats.fresh || 0) + 1; statsDirty = true;
+    stats.skins.push(k.id); stats.newSkins = [...(stats.newSkins || []), k.id]; statsDirty = true;   // NEW tag until viewed
     if (!silent || k.id === 'classic') { toasts.push({ id: k.id, t: 0 }); sfx('token'); }   // the secret always gets its moment
   }
   if (statsDirty) { statsDirty = false; saveStats(); }
@@ -2155,7 +2155,14 @@ function buttonRow(y, items, gap = 10) {   // [[label, act], ...] centred side b
 
 // ============================================================ skins screen
 const skinsUI = { open: false, sel: null, rect: null };
-function openSkins() { if (!settingsAllowed()) return; skinsUI.open = true; skinsUI.sel = equipped().id; stats.fresh = 0; saveStats(); notesPage = -1; sfx('blip', true); }
+function openSkins() {
+  if (!settingsAllowed()) return;
+  const fresh = (stats.newSkins || []).filter(hasSkin);
+  skinsUI.open = true; skinsUI.sel = fresh.length ? fresh[fresh.length - 1] : equipped().id;   // jump to the newest unlock
+  stats.fresh = 0; saveStats(); notesPage = -1; sfx('blip', true);
+}
+const isNewSkin = id => (stats.newSkins || []).includes(id);
+function seenSkin(id) { if (isNewSkin(id)) { stats.newSkins = stats.newSkins.filter(x => x !== id); saveStats(); } }
 function closeSkins() { skinsUI.open = false; sfx('blip', false); }
 const TIER_COL = { secret: '#ffd23f', base: '#c9b968', gold: '#f8c81c', plat: '#c8d0e0', diamond: '#5ad0f8', dark: '#9040e0', dev: '#ff5cc8' };
 function drawSkins() {
@@ -2186,7 +2193,13 @@ function drawSkins() {
     }
     if (isEq) { g.fillStyle = '#e86a17'; for (const [ox, oy, ow, oh] of [[0, 0, cw, 2], [0, ch - 2, cw, 2], [0, 0, 2, ch], [cw - 2, 0, 2, ch]]) g.fillRect(cx + ox, cy + oy, ow, oh); }
     if (isSel && !isEq) { g.fillStyle = '#fff'; for (const [ox, oy, ow, oh] of [[0, 0, cw, 2], [0, ch - 2, cw, 2], [0, 0, 2, ch], [cw - 2, 0, 2, ch]]) g.fillRect(cx + ox, cy + oy, ow, oh); }
-    buttons.push({ x: cx, y: cy, w: cw, h: ch, act: () => { skinsUI.sel = k.id; sfx('blip', true); } });
+    if (have && isNewSkin(k.id)) {                 // NEW tag in the corner until you tap it
+      const tx = cx + cw - 30, ty = cy - 3, pulse = (tick >> 4) & 1;
+      g.fillStyle = '#543847'; g.fillRect(tx, ty, 30, 14);
+      g.fillStyle = pulse ? '#ff4a5e' : '#e8302a'; g.fillRect(tx + 2, ty + 2, 26, 10);
+      text('NEW', tx + 15, ty + 3, 1, '#fff', '#000', 0);
+    }
+    buttons.push({ x: cx, y: cy, w: cw, h: ch, act: () => { skinsUI.sel = k.id; seenSkin(k.id); sfx('blip', true); } });
   });
   // details of the selected skin
   const k = skinById(skinsUI.sel || 'rookie'), have = hasSkin(k.id), dy = gy + rows * ch + 8;
@@ -2215,7 +2228,7 @@ function drawSkins() {
     ly += 4;
   }
   const eqd = equipped().id === k.id;
-  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; saveStats(); sfx('coin'); } }, have && !eqd);
+  button(x + 14, y + h - 42, 120, 30, eqd ? 'EQUIPPED' : have ? 'EQUIP' : 'LOCKED', () => { if (have && !eqd) { stats.skin = k.id; seenSkin(k.id); saveStats(); sfx('coin'); } }, have && !eqd);
   button(x + w - 14 - 100, y + h - 42, 100, 30, 'DONE', closeSkins);
 }
 let birdShadowC = null;
@@ -2226,9 +2239,10 @@ function birdShadow() {           // dark silhouette for locked skins (made once
   return birdShadowC = c;
 }
 function skinsButtonBadge() {     // red NEW dot on the SKINS button
-  const b = buttons.find(b => b.label === 'SKINS'); if (!b || !stats.fresh) return;
+  const n = (stats.newSkins || []).filter(hasSkin).length || stats.fresh || 0;
+  const b = buttons.find(b => b.label === 'SKINS'); if (!b || !n) return;
   const bx = b.x + b.w - 10, by = b.y + 4;
-  pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(stats.fresh, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
+  pcircle(bx, by, 9, '#543847'); pcircle(bx, by, 7, '#f83850'); text(Math.min(n, 9), bx + 1, by - 6, 2, '#fff', '#000', 0);
 }
 function drawToasts() {           // "NEW SKIN!" cards sliding in at the top
   toasts.slice(0, 1).forEach(tt => {
