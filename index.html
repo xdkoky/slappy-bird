@@ -140,6 +140,10 @@ let ac, master, verbIn, noiseBuf;
 function audioInit() {
   if (ac) { if (ac.state !== 'running') ac.resume(); return; }
   ac = new (window.AudioContext || window.webkitAudioContext)();
+  // A phone call (even just the incoming-call banner, which keeps the page on screen), Siri or an alarm
+  // takes the audio away from us: running -> interrupted/suspended. Treat that as the player being called away.
+  let acWas = ac.state;
+  ac.onstatechange = () => { if (acWas === 'running' && ac.state !== 'running') autoPause(); acWas = ac.state; };
   const comp = ac.createDynamicsCompressor();
   comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.002; comp.release.value = 0.12;
   master = ac.createGain(); master.gain.value = muted ? 0 : 0.8;
@@ -1054,10 +1058,13 @@ function drawGoals() {
 const COUNT_STEP = 45, COUNT_LEN = COUNT_STEP * 3;
 let resumeT = 0;   // frames left in the resume countdown
 function setPaused(v) {
-  v = v && state === 'play' && !raceOn();   // a race can't be paused
+  v = v && (state === 'play' || state === 'slot' || state === 'revive') && !raceOn();   // a race can't be paused
   if (v) { if (!paused || resumeT) { paused = true; resumeT = 0; sfx('blip', false); } }
   else if (paused && !resumeT) { resumeT = COUNT_LEN; sfx('tick'); }
 }
+// Called away (phone call, app switch, notification centre, screen lock...): pause instead of losing the
+// run. The slot machine pauses too, so its CONTINUE? countdown can't run out while you're on the phone.
+function autoPause() { setPaused(true); }   // (also re-pauses during the 3-2-1 countdown)
 function countdownStep() {   // one 60Hz frame of the resume countdown
   if (--resumeT <= 0) { resumeT = 0; paused = false; sfx('blip', true); }
   else if (resumeT % COUNT_STEP === 0) sfx('tick');
@@ -3420,7 +3427,7 @@ if (TOUCH) {
     addEventListener(t, e => { if (!(e.target.closest && e.target.closest('#namebox'))) e.preventDefault(); }, { passive: false });
   addEventListener('touchend', () => audioInit());
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { if (race.phase === 'run' && state === 'play') crash(false); setPaused(true); }   // leaving mid-race forfeits
+    if (document.hidden) { if (race.phase === 'run' && state === 'play') crash(false); }   // leaving mid-race forfeits
     else audioInit();
   });
   // Check for a new version whenever the app comes back to the foreground; once it's installed,
@@ -3435,7 +3442,10 @@ if (TOUCH) {
   }
 }
 addEventListener('contextmenu', e => e.preventDefault());
-addEventListener('blur', () => setPaused(true));
+addEventListener('blur', autoPause);
+document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
+addEventListener('pagehide', autoPause);
+document.addEventListener('freeze', autoPause);
 
 // ============================================================ main loop (fixed 60Hz simulation)
 const STEP = 1000 / 60, led = document.getElementById('led');
@@ -3457,6 +3467,7 @@ function syncThemeColor() {
 }
 function loop(now) {
   if (updateReady && (state === 'ready' || (state === 'over' && overT > 50))) { updateReady = false; location.reload(); }
+  if (now - prev > 400) autoPause();   // the page was frozen or starved for a moment (a call, the lock screen, ...)
   acc = Math.min(acc + now - prev, 250); prev = now;
   let stepped = false;
   while (acc >= STEP) { if (resumeT) countdownStep(); else if (!paused) update(); acc -= STEP; stepped = true; }
