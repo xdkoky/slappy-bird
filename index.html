@@ -976,7 +976,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 17;
-const BUILD = '1012-25';   // bump with sw.js VERSION on every update (shown in settings)
+const BUILD = '1012-26';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 17, title: 'TRAILS', items: [
     { h: 'LEAVE A MARK', col: '#9a5af0', t: 'NEW TRAILS STREAM OUT BEHIND YOUR BIRD. PAIR ANY TRAIL WITH ANY SKIN.' },
@@ -2559,6 +2559,14 @@ function drawSkins() {
   button(x + w - 14 - 100, y + h - 42, 100, 30, 'DONE', closeSkins);
 }
 let birdShadowC = null;
+const shadowCache = new WeakMap();
+function shadowOf(c) {            // a sprite tinted in the drop-shadow colour (cached per frame canvas)
+  let s = shadowCache.get(c); if (s) return s;
+  s = document.createElement('canvas'); s.width = c.width; s.height = c.height;
+  const x = s.getContext('2d'); x.drawImage(c, 0, 0);
+  x.globalCompositeOperation = 'source-in'; x.fillStyle = '#1c1028'; x.fillRect(0, 0, s.width, s.height);
+  shadowCache.set(c, s); return s;
+}
 function birdShadow() {           // dark silhouette for locked skins (made once)
   if (birdShadowC) return birdShadowC;
   const c = silhouette(birdFrames[1]), x = c.getContext('2d');
@@ -2960,10 +2968,11 @@ function drawLB() {
     // each player's bird, big and tilted up, hanging over the row lines; rare skins twinkle
     for (const bd of birds) {
       const k = skinById(bd.id), bob = Math.round(Math.sin(tick * 0.08 + bd.i * 0.9)), cx = x + 54, cy = bd.ly + 5 + bob;
-      g.fillStyle = 'rgba(40,24,50,0.2)'; g.fillRect(cx - 10, bd.ly + 18, 20, 2);                       // soft shadow
-      g.save(); g.translate(cx, cy); g.rotate(-0.26);
-      g.drawImage(skinFrame(bd.id, [0, 1, 2, 1][((tick >> 3) + bd.i) % 4]), -15, -11, 30, 22);
-      g.restore();
+      const fr = skinFrame(bd.id, [0, 1, 2, 1][((tick >> 3) + bd.i) % 4]), sh = shadowOf(fr);
+      for (const [dx, dy, a] of [[4, 5, 0.13], [2, 3, 0.17], [0, 0, 1]]) {   // drop shadow like in the game: two soft offsets, then the bird
+        g.save(); g.translate(cx + dx, cy + dy); g.rotate(-0.26); g.globalAlpha = a;
+        g.drawImage(a < 1 ? sh : fr, -15, -11, 30, 22); g.restore();
+      }
       if (k.tier !== 'base' && k.tier !== 'secret' || k.id === 'classic') {                               // the rare ones sparkle
         const ph = (tick + bd.i * 13) % 50, s = ph < 6 ? 1 : ph < 12 ? 3 : ph < 18 ? 1 : 0;
         if (s) { const sx = cx + 14, sy = cy - 13, c = k.id === 'classic' ? '#ffd23f' : TIER_COL[k.tier];
