@@ -867,6 +867,7 @@ function pcircle(cx, cy, r, col) {
 // Shown once on the title screen after an update (bump NOTES_VERSION), reopenable with the button / N key.
 // Font has A-Z 0-9 and ! < > - + . : ? / only. Each page: title + items of { h: heading, t: text, col }.
 const NOTES_VERSION = 15;
+const BUILD = '1012-17';   // bump with sw.js VERSION on every update (shown in settings)
 const PATCH_NOTES = [
   { v: 15, title: 'HOMEBODY', items: [
     { h: 'NEW SKIN', col: '#2a9aa8', t: 'PLAY FROM YOUR HOME SCREEN AND GET HOMEBODY. A SKY BLUE BIRD WITH DRIFTING CLOUDS!' },
@@ -1941,6 +1942,7 @@ function drawSettings() {
     ly += 42;
   }
   button(Math.round(LW / 2 - 60), y + h - 46, 120, 30, 'DONE', closeSettings);
+  text('BUILD ' + BUILD, x + w - 8, y + 6, 1, '#a89868', '#000', 0, 'r');   // so players can tell if they have the latest update
 }
 
 // ============================================================ 1v1 race (two phones, live)
@@ -3445,6 +3447,8 @@ addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('blur', autoPause);
 document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
 addEventListener('pagehide', autoPause);
+// Safari's Audio Session API reports a ringing call / Siri directly as 'interrupted'.
+try { if (navigator.audioSession) navigator.audioSession.addEventListener('statechange', () => { if (navigator.audioSession.state === 'interrupted') autoPause(); }); } catch {}
 document.addEventListener('freeze', autoPause);
 
 // ============================================================ main loop (fixed 60Hz simulation)
