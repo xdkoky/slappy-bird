@@ -1,6 +1,6 @@
 {
-  "name": "Slappy Bird",
-  "short_name": "Slappy Bird",
+  "name": "Slappy Birb",
+  "short_name": "Slappy Birb",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

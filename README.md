@@ -1,4 +1,4 @@
-# Slappy Bird
+# Slappy Birb
 
 Play it at https://xdkoky.github.io/slappy-bird/
 
