@@ -1,6 +1,6 @@
 # Slappy Fih
 
-Play it at https://xdkoky.github.io/slappy-bird/
+Play it at https://slappyfih.com
 
 This repository only holds the published build of the game. The source code is private.
 
